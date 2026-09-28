@@ -6,6 +6,7 @@ import { audit,command } from '../../core/commands';
 import { AdmissionDto,ClassDto,PageDto,TransferDto,TransitionDto,WithdrawalDto,YearDto } from './learners.dto';
 @Injectable()
 export class LearnersService {
+  async lockIdentityCatalog(client:PoolClient,schoolId:string){await client.query('SELECT pg_advisory_xact_lock(hashtextextended($1,0))',[`${schoolId}:learner-identity-catalog`]);}
   async page(client:PoolClient,schoolId:string,table:'learners'|'admissions',page:PageDto) {
     const search=`%${(page.search??'').trim().replace(/[\\%_]/g,'\\$&')}%`;
     const filter="a.school_id=$1 AND (a.full_name ILIKE $2 ESCAPE '\\' OR a.admission_number ILIKE $2 ESCAPE '\\')";
@@ -51,6 +52,7 @@ export class LearnersService {
   }
   createAdmission(client:PoolClient,actor:Actor,body:AdmissionDto) {
     return command(client,actor,body.operationId,'admission.create',body,async()=>{
+      await this.lockIdentityCatalog(client,actor.schoolId);
       await this.classForDate(client,actor.schoolId,body.classId,body.startDate);
       if(body.dateOfBirth&&body.dateOfBirth>=body.startDate)throw new BadRequestException('Birth date must precede enrolment');
       const existing=await client.query('SELECT id FROM learners WHERE school_id=$1 AND admission_number=$2',[actor.schoolId,body.admissionNumber]);
@@ -70,6 +72,7 @@ export class LearnersService {
       if(body.action!=='enrol'&&body.capacityOverrideReason)throw new BadRequestException('Capacity overrides apply only to enrolment');
       let learnerId:string|null=null;
       if(next==='enrolled') {
+        await this.lockIdentityCatalog(client,actor.schoolId);
         const section=await this.classForDate(client,actor.schoolId,record.class_id,record.start_date);
         await this.ensureCapacity(client,actor,section,record.start_date,body.capacityOverrideReason);
         learnerId=randomUUID();

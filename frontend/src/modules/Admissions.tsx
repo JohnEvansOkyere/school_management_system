@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { request } from '../lib/api';
+import { LearnerImports } from './LearnerImports';
 
 type Role = 'headteacher' | 'frontdesk' | string;
 type AcademicYear = { id: string; name: string; start_date: string; end_date: string };
@@ -202,6 +203,7 @@ export function Admissions({ schoolId, csrfToken, role }: Props) {
         <label>Proposed start date<input type="date" value={application.startDate} onChange={e => setApplication({ ...application, startDate: e.target.value })} required/></label>
         <button disabled={busy || !classes.length}>{busy ? 'Saving…' : 'Record application'}</button>
       </form>
+      <LearnerImports schoolId={schoolId} csrfToken={csrfToken} role={role} onCommitted={() => loadWorkspace(false, true)} />
 
       <h3>Learner records</h3>
       <form className="actions" onSubmit={event => { event.preventDefault(); setLearnersOffset(0); setLearnersSearch(learnersSearchInput.trim()); }}>

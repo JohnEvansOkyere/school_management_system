@@ -9,6 +9,32 @@ async function signIn(page:Page,email='head@example.test') {
   await expect(page.getByRole('button',{name:'Sign out',exact:true})).toBeVisible();await page.getByRole('combobox',{name:'School',exact:true}).selectOption(school);
   await expect(page.getByRole('heading',{name:'Adinkra Synthetic School',exact:true})).toBeVisible();
 }
+test('CSV import requires fresh review, commits selected learners and retains approval on reload',async({page})=>{
+  const errors:string[]=[];page.on('pageerror',error=>errors.push(error.message));await signIn(page);
+  const suffix=randomUUID().slice(0,8),className=`CSV class ${suffix}`,fileName=`learners-${suffix}.csv`,reason='Reviewed synthetic source and distinct identities';
+  const session=await (await page.request.get('/api/v1/auth/session')).json();
+  async function post(route:string,body:Record<string,unknown>){const response=await page.request.post(`/api/v1/schools/${school}${route}`,{headers:{'x-csrf-token':session.csrfToken},data:{operationId:randomUUID(),...body}});expect(response.status(),await response.text()).toBe(201);return response.json();}
+  const year=await post('/academic-years',{name:`CSV year ${suffix}`,startDate:'2026-09-01',endDate:'2027-08-01'}),section=await post('/classes',{name:className,level:'Primary',capacity:5,academicYearId:year.id});
+  await page.getByRole('button',{name:'Import existing learners',exact:true}).click();
+  await page.getByLabel('Search import classes',{exact:true}).fill(className);await page.getByRole('button',{name:'Search classes',exact:true}).first().click();await page.getByRole('combobox',{name:'Target class',exact:true}).selectOption(section.id);
+  await page.getByLabel('Search import classes',{exact:true}).fill('no matching class');await page.getByRole('button',{name:'Search classes',exact:true}).first().click();await expect(page.getByRole('combobox',{name:'Target class',exact:true})).toHaveValue('');
+  await page.getByLabel('Search import classes',{exact:true}).fill(className);await page.getByRole('button',{name:'Search classes',exact:true}).first().click();await page.getByRole('combobox',{name:'Target class',exact:true}).selectOption(section.id);
+  await page.getByLabel('Enrolment start date',{exact:true}).fill('2026-09-01');
+  await page.getByLabel('CSV file',{exact:true}).setInputFiles({name:fileName,mimeType:'text/csv',buffer:Buffer.from(`admission_number,full_name,date_of_birth\nCSV-A-${suffix},Synthetic Import A ${suffix},2019-01-01\nCSV-B-${suffix},Synthetic Import B ${suffix},\nINVALID!,Invalid learner,`)});
+  await page.getByRole('button',{name:'Stage CSV for validation',exact:true}).click();await expect(page.getByRole('heading',{name:`Preview: ${fileName}`,exact:true})).toBeVisible();
+  await expect(page.getByLabel(`Row 2: Synthetic Import A ${suffix} · CSV-A-${suffix} · Born 2019-01-01`,{exact:true})).toBeDisabled();
+  await page.reload();await page.getByRole('combobox',{name:'School',exact:true}).selectOption(school);await page.getByRole('button',{name:'Import existing learners',exact:true}).click();
+  await page.getByLabel('Search import batches',{exact:true}).fill(fileName);await page.getByRole('button',{name:'Search batches',exact:true}).click();await page.locator('li').filter({hasText:fileName}).getByRole('button',{name:'Open import preview',exact:true}).click();
+  await page.getByRole('button',{name:'Revalidate this preview',exact:true}).click();await expect(page.getByRole('status').filter({hasText:'Validation refreshed.'})).toBeVisible();
+  const first=page.getByLabel(`Row 2: Synthetic Import A ${suffix} · CSV-A-${suffix} · Born 2019-01-01`,{exact:true}),second=page.getByLabel(`Row 3: Synthetic Import B ${suffix} · CSV-B-${suffix}`,{exact:true}),confirmation=page.getByLabel('I reviewed the validation results and selected learner identities for this import.',{exact:true});
+  await first.check();await page.getByLabel('Import approval reason',{exact:true}).fill(reason);await confirmation.check();await expect(page.getByRole('button',{name:'Commit 1 selected rows',exact:true})).toBeEnabled();
+  await second.check();await expect(confirmation).not.toBeChecked();await expect(page.getByRole('button',{name:'Commit 2 selected rows',exact:true})).toBeDisabled();await confirmation.check();
+  await page.getByLabel('Import approval reason',{exact:true}).fill(reason+' reviewed');await expect(confirmation).not.toBeChecked();await confirmation.check();
+  await page.setViewportSize({width:375,height:812});expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);await page.getByRole('button',{name:'Commit 2 selected rows',exact:true}).click();await expect(page.getByRole('status').filter({hasText:'Import committed. 2 learner rows were processed.'})).toBeVisible();
+  await page.reload();await page.getByRole('combobox',{name:'School',exact:true}).selectOption(school);await page.getByRole('button',{name:'Import existing learners',exact:true}).click();await page.getByLabel('Search import batches',{exact:true}).fill(fileName);await page.getByRole('button',{name:'Search batches',exact:true}).click();await page.locator('li').filter({hasText:fileName}).getByRole('button',{name:'Open import preview',exact:true}).click();
+  await expect(page.getByText(`Approval reason: ${reason} reviewed`,{exact:true})).toBeVisible();await expect(page.getByRole('status').filter({hasText:'This import is committed'})).toBeVisible();
+  const learners=await (await page.request.get(`/api/v1/schools/${school}/learners?search=CSV-A-${suffix}`)).json();expect(learners.total).toBe(1);const detail=await (await page.request.get(`/api/v1/schools/${school}/learners/${learners.items[0].id}`)).json();expect(detail.enrolments).toHaveLength(1);expect(detail.enrolments[0].class_id).toBe(section.id);expect(errors).toEqual([]);
+});
 test('admission decisions, enrolment, transfer and reload preserve history',async({page})=>{
   const errors:string[]=[];page.on('pageerror',error=>errors.push(error.message));
   const suffix=randomUUID().slice(0,8),yearName=`Browser year ${suffix}`,first=`Primary Blue ${suffix}`,second=`Primary Green ${suffix}`,name=`Synthetic Browser Learner ${suffix}`,admission=`WEB-${suffix}`;
