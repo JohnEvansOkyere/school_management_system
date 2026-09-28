@@ -1,15 +1,12 @@
-import React, { FormEvent, useEffect, useState } from 'react';
+import React, { FormEvent, useEffect, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import './style.css';
+import { request } from './lib/api';
+import { AuditExport } from './modules/AuditExport';
+import { Admissions } from './modules/Admissions';
 type School = {id:string;name:string;role:string;version:number};
 type Session = {displayName:string;csrfToken:string;schools:School[]};
-type Audit = {id:string;action:string;created_at:string;metadata:{version:number}};
-async function request<T>(url:string, options:RequestInit = {}):Promise<T> {
-  const response = await fetch(`/api/v1${url}`,{...options,headers:{'Content-Type':'application/json',...options.headers}});
-  const data = await response.json();
-  if (!response.ok) { const error = new Error(Array.isArray(data.message) ? data.message.join('. ') : data.message ?? 'Request failed'); Object.assign(error,{status:response.status}); throw error; }
-  return data;
-}
+type Audit = {id:string;action:string;created_at:string;metadata:{version?:number}};
 function App() {
   const [session,setSession] = useState<Session|null>(null);
   const [school,setSchool] = useState<School|null>(null);
@@ -20,13 +17,17 @@ function App() {
   const [status,setStatus] = useState('');
   const [busy,setBusy] = useState(false);
   const [loading,setLoading] = useState(true);
+  const selectionEpoch=useRef(0);
   async function selectSchool(id:string) {
+    const epoch=++selectionEpoch.current;
     setSchool(null);setAudit([]);setName('');setStatus('');
     try {
       const current = await request<School>(`/schools/${id}`);
+      if(epoch!==selectionEpoch.current)return;
       setSchool(current);setName(current.name);
-      if(current.role==='headteacher') setAudit(await request<Audit[]>(`/schools/${id}/audit`));
+      if(current.role==='headteacher') {const events=await request<Audit[]>(`/schools/${id}/audit`);if(epoch===selectionEpoch.current)setAudit(events);}
     } catch(error) {
+      if(epoch!==selectionEpoch.current)return;
       if((error as {status?:number}).status===401){setSession(null);setStatus('Your session ended. Sign in again.');}
       else setStatus((error as Error).message);
     }
@@ -52,11 +53,11 @@ function App() {
   }
   async function signOut() {
     if(!session)return;setBusy(true);
-    try {await request('/auth/logout',{method:'POST',headers:{'x-csrf-token':session.csrfToken}});setSession(null);setSchool(null);setAudit([]);setStatus('Signed out');}
+    try {await request('/auth/logout',{method:'POST',headers:{'x-csrf-token':session.csrfToken}});selectionEpoch.current++;setSession(null);setSchool(null);setAudit([]);setStatus('Signed out');}
     catch(error){setStatus((error as Error).message);}finally{setBusy(false);}
   }
   if(loading)return <main><p role="status">Loading workspace…</p></main>;
   if(!session)return <main className="login"><p className="eyebrow">School workspace · Local development</p><h1>Welcome back</h1><p>Use a synthetic staff account to open your school.</p><form onSubmit={signIn}><label>Email<input type="email" autoComplete="username" value={email} onChange={e=>setEmail(e.target.value)} required/></label><label>Password<input type="password" autoComplete="current-password" value={password} onChange={e=>setPassword(e.target.value)} required/></label><button disabled={busy}>{busy?'Signing in…':'Sign in'}</button></form><p role="status">{status}</p><p className="muted">Synthetic data only. Managed identity is pending provider selection.</p></main>;
-  return <><header><a href="/" className="brand">School workspace</a><span>{session.displayName}</span><button className="secondary" disabled={busy} onClick={signOut}>Sign out</button></header><main><p className="eyebrow">Your school</p><label className="school-picker">School<select value={school?.id??''} disabled={busy} onChange={e=>{setBusy(true);selectSchool(e.target.value).catch(error=>setStatus(error.message)).finally(()=>setBusy(false));}}>{!school&&<option value="">Loading…</option>}{session.schools.map(s=><option key={s.id} value={s.id}>{s.name}</option>)}</select></label>{school&&<><h1>{school.name}</h1><p className="muted">Signed in as {school.role}. All records are scoped to this school.</p><section><h2>School details</h2>{school.role==='headteacher'?<form onSubmit={save}><label>School name<input value={name} minLength={3} maxLength={120} onChange={e=>setName(e.target.value)} required/></label><div className="actions"><button disabled={busy||name===school.name}>{busy?'Saving…':'Save details'}</button><button className="secondary" type="button" disabled={busy} onClick={()=>selectSchool(school.id).catch(error=>setStatus(error.message))}>Reload details</button></div><p className="muted">{name!==school.name?'Unsaved changes':`Saved version ${school.version}`}</p></form>:<p>School details are maintained by the headteacher.</p>}<p role="status" aria-live="polite">{status}</p></section>{school.role==='headteacher'&&<section><h2>Recent changes</h2>{audit.length?<ul className="history">{audit.map(item=><li key={item.id}><strong>School details saved</strong><span>Version {item.metadata.version} · {new Date(item.created_at).toLocaleString('en-GH',{timeZone:'Africa/Accra'})}</span></li>)}</ul>:<p>No changes recorded yet.</p>}</section>}</>}{!school&&<p role="status">{status||'Select an available school to continue.'}</p>}<p className="muted">Local foundation build · Synthetic schools</p></main></>;
+  return <><header><a href="/" className="brand">School workspace</a><span>{session.displayName}</span><button className="secondary" disabled={busy} onClick={signOut}>Sign out</button></header><main><p className="eyebrow">Your school</p><label className="school-picker">School<select value={school?.id??''} disabled={busy} onChange={e=>{setBusy(true);selectSchool(e.target.value).catch(error=>setStatus(error.message)).finally(()=>setBusy(false));}}>{!school&&<option value="">Loading…</option>}{session.schools.map(s=><option key={s.id} value={s.id}>{s.name}</option>)}</select></label>{school&&<><h1>{school.name}</h1><p className="muted">Signed in as {school.role}. All records are scoped to this school.</p>{['headteacher','frontdesk'].includes(school.role)&&<Admissions key={school.id} schoolId={school.id} csrfToken={session.csrfToken} role={school.role}/>}<section><h2>School details</h2>{school.role==='headteacher'?<form onSubmit={save}><label>School name<input value={name} minLength={3} maxLength={120} onChange={e=>setName(e.target.value)} required/></label><div className="actions"><button disabled={busy||name===school.name}>{busy?'Saving…':'Save details'}</button><button className="secondary" type="button" disabled={busy} onClick={()=>selectSchool(school.id).catch(error=>setStatus(error.message))}>Reload details</button></div><p className="muted">{name!==school.name?'Unsaved changes':`Saved version ${school.version}`}</p></form>:<p>School details are maintained by the headteacher.</p>}<p role="status" aria-live="polite">{status}</p></section>{school.role==='headteacher'&&<section><h2>Recent changes</h2><AuditExport key={school.id} schoolId={school.id} csrfToken={session.csrfToken}/>{audit.length?<ul className="history">{audit.map(item=><li key={item.id}><strong>{({"school.details.updated":"School details saved","audit.export.requested":"Audit export requested"} as Record<string,string>)[item.action]??item.action.replaceAll("."," ")}</strong><span>{item.metadata.version?`Version ${item.metadata.version} · `:""}{new Date(item.created_at).toLocaleString('en-GH',{timeZone:'Africa/Accra'})}</span></li>)}</ul>:<p>No changes recorded yet.</p>}</section>}</>}{!school&&<p role="status">{status||'Select an available school to continue.'}</p>}<p className="muted">Local foundation build · Synthetic schools</p></main></>;
 }
 createRoot(document.getElementById('root')!).render(<React.StrictMode><App/></React.StrictMode>);

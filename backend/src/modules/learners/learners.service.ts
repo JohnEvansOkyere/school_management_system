@@ -1,0 +1,111 @@
+import { BadRequestException,ConflictException,Injectable,NotFoundException,ForbiddenException } from '@nestjs/common';
+import { PoolClient } from 'pg';
+import { randomUUID } from 'node:crypto';
+import { Actor } from '../../core/access';
+import { audit,command } from '../../core/commands';
+import { AdmissionDto,ClassDto,PageDto,TransferDto,TransitionDto,YearDto } from './learners.dto';
+@Injectable()
+export class LearnersService {
+  async page(client:PoolClient,schoolId:string,table:'learners'|'admissions',page:PageDto) {
+    const search=`%${(page.search??'').trim().replace(/[\\%_]/g,'\\$&')}%`;
+    const filter="a.school_id=$1 AND (a.full_name ILIKE $2 ESCAPE '\\' OR a.admission_number ILIKE $2 ESCAPE '\\')";
+    const total=Number((await client.query(`SELECT count(*) FROM ${table} a WHERE ${filter}`,[schoolId,search])).rows[0].count);
+    const select=table==='learners'?'a.id,a.full_name,a.admission_number,a.date_of_birth::text,a.version':'a.id,a.full_name,a.date_of_birth::text,a.status,a.class_id,c.name AS class_name,a.start_date::text,a.admission_number,a.version,a.learner_id,a.decision_reason';
+    const join=table==='admissions'?'JOIN class_sections c ON c.school_id=a.school_id AND c.id=a.class_id':'';
+    const order=table==='admissions'?'a.created_at DESC,a.id':'a.full_name,a.id';
+    const items=(await client.query(`SELECT ${select} FROM ${table} a ${join} WHERE ${filter} ORDER BY ${order} LIMIT $3 OFFSET $4`,[schoolId,search,page.limit,page.offset])).rows;
+    return {items,total,limit:page.limit,offset:page.offset};
+  }
+  async classForDate(client:PoolClient,schoolId:string,classId:string,date:string) {
+    const result=await client.query('SELECT c.*,y.start_date::text,y.end_date::text FROM class_sections c JOIN academic_years y ON y.school_id=c.school_id AND y.id=c.academic_year_id WHERE c.school_id=$1 AND c.id=$2 FOR UPDATE OF c',[schoolId,classId]);
+    if(!result.rowCount)throw new NotFoundException('Class unavailable');
+    const section=result.rows[0];
+    if(date<section.start_date||date>=section.end_date)throw new BadRequestException('Enrolment date must be inside the class academic year');
+    return section;
+  }
+  async ensureCapacity(client:PoolClient,actor:Actor,section:any,start:string,override?:string) {
+    // Every class write takes this class lock. Check the entire remaining year, including scheduled transfers.
+    const events=await client.query("SELECT start_date::text AS date,1 AS delta FROM enrolments WHERE school_id=$1 AND class_id=$2 AND start_date<$4 AND (end_date IS NULL OR end_date>$3) UNION ALL SELECT end_date::text AS date,-1 AS delta FROM enrolments WHERE school_id=$1 AND class_id=$2 AND end_date>$3 AND end_date<$4 ORDER BY date,delta",[actor.schoolId,section.id,start,section.end_date]);
+    let occupancy=0,maxOccupancy=0;
+    // Existing enrolments that started before the new start contribute to initial occupancy.
+    for(const event of events.rows){occupancy+=event.delta;maxOccupancy=Math.max(maxOccupancy,occupancy);}
+    if(maxOccupancy>=section.capacity) {
+      if(!override)throw new ConflictException('Class capacity would be exceeded. A headteacher override needs a reason');
+      if(actor.role!=='headteacher')throw new ForbiddenException('Only the headteacher can override capacity');
+    }else if(override&&actor.role!=='headteacher')throw new ForbiddenException('Only the headteacher can record a capacity override');
+  }
+  createYear(client:PoolClient,actor:Actor,body:YearDto) {
+    return command(client,actor,body.operationId,'calendar.year.create',body,async()=>{
+      if(body.startDate>=body.endDate)throw new BadRequestException('Academic year end must follow its start');
+      const result=await client.query('INSERT INTO academic_years(id,school_id,name,start_date,end_date) VALUES($1,$2,$3,$4,$5) RETURNING id,name,start_date::text,end_date::text',[randomUUID(),actor.schoolId,body.name.trim(),body.startDate,body.endDate]);
+      await audit(client,actor,'calendar.year.created',result.rows[0].id);return result.rows[0];
+    });
+  }
+  createClass(client:PoolClient,actor:Actor,body:ClassDto) {
+    return command(client,actor,body.operationId,'class.create',body,async()=>{
+      const year=await client.query('SELECT id FROM academic_years WHERE school_id=$1 AND id=$2',[actor.schoolId,body.academicYearId]);
+      if(!year.rowCount)throw new NotFoundException('Academic year unavailable');
+      const result=await client.query('INSERT INTO class_sections(id,school_id,academic_year_id,name,level,capacity) VALUES($1,$2,$3,$4,$5,$6) RETURNING *',[randomUUID(),actor.schoolId,body.academicYearId,body.name.trim(),body.level,body.capacity]);
+      await audit(client,actor,'class.created',result.rows[0].id);return result.rows[0];
+    });
+  }
+  createAdmission(client:PoolClient,actor:Actor,body:AdmissionDto) {
+    return command(client,actor,body.operationId,'admission.create',body,async()=>{
+      await this.classForDate(client,actor.schoolId,body.classId,body.startDate);
+      if(body.dateOfBirth&&body.dateOfBirth>=body.startDate)throw new BadRequestException('Birth date must precede enrolment');
+      const existing=await client.query('SELECT id FROM learners WHERE school_id=$1 AND admission_number=$2',[actor.schoolId,body.admissionNumber]);
+      if(existing.rowCount)throw new ConflictException('Admission number already belongs to a learner');
+      const result=await client.query('INSERT INTO admissions(id,school_id,full_name,date_of_birth,class_id,start_date,admission_number) VALUES($1,$2,$3,$4,$5,$6,$7) RETURNING id,full_name,status,version',[randomUUID(),actor.schoolId,body.fullName.trim(),body.dateOfBirth??null,body.classId,body.startDate,body.admissionNumber]);
+      await audit(client,actor,'admission.created',result.rows[0].id);return result.rows[0];
+    });
+  }
+  transition(client:PoolClient,actor:Actor,id:string,body:TransitionDto) {
+    return command(client,actor,body.operationId,'admission.transition',{id,...body},async()=>{
+      const application=await client.query('SELECT *,start_date::text,date_of_birth::text FROM admissions WHERE school_id=$1 AND id=$2 FOR UPDATE',[actor.schoolId,id]);
+      if(!application.rowCount)throw new NotFoundException('Application unavailable');
+      const record=application.rows[0];if(record.version!==body.version)throw new ConflictException('Application changed. Reload before continuing');
+      const transitions:Record<string,Record<string,string>>={application:{review:'review'},review:{offer:'offered',waitlist:'waitlisted',decline:'declined'},waitlisted:{offer:'offered',decline:'declined'},offered:{accept:'accepted'},accepted:{enrol:'enrolled'}};
+      const next=transitions[record.status]?.[body.action];if(!next)throw new ConflictException('This action is not available in the current application state');
+      if(['waitlist','decline'].includes(body.action)&&!body.reason)throw new BadRequestException('A decision reason is required');
+      if(body.action!=='enrol'&&body.capacityOverrideReason)throw new BadRequestException('Capacity overrides apply only to enrolment');
+      let learnerId:string|null=null;
+      if(next==='enrolled') {
+        const section=await this.classForDate(client,actor.schoolId,record.class_id,record.start_date);
+        await this.ensureCapacity(client,actor,section,record.start_date,body.capacityOverrideReason);
+        learnerId=randomUUID();
+        await client.query('INSERT INTO learners(id,school_id,admission_number,full_name,date_of_birth) VALUES($1,$2,$3,$4,$5)',[learnerId,actor.schoolId,record.admission_number,record.full_name,record.date_of_birth]);
+        await client.query('INSERT INTO enrolments(id,school_id,learner_id,class_id,start_date) VALUES($1,$2,$3,$4,$5)',[randomUUID(),actor.schoolId,learnerId,record.class_id,record.start_date]);
+      }
+      const result=await client.query('UPDATE admissions SET status=$1,version=version+1,learner_id=$2,decision_reason=COALESCE($3,decision_reason) WHERE school_id=$4 AND id=$5 RETURNING id,status,version,learner_id',[next,learnerId,body.reason??null,actor.schoolId,id]);
+      await audit(client,actor,`admission.${next}`,id,{version:result.rows[0].version,capacityOverride:!!body.capacityOverrideReason,...(body.reason?{reason:body.reason}:{})});
+      if(body.capacityOverrideReason)await audit(client,actor,'class.capacity.override',record.class_id,{reason:body.capacityOverrideReason,applicationId:id});
+      return result.rows[0];
+    });
+  }
+  async learner(client:PoolClient,schoolId:string,id:string,lock=false) {
+    const result=await client.query(`SELECT id,full_name,admission_number,date_of_birth::text,version FROM learners WHERE school_id=$1 AND id=$2${lock?' FOR UPDATE':''}`,[schoolId,id]);
+    if(!result.rowCount)throw new NotFoundException('Learner unavailable');
+    const enrolments=await client.query('SELECT e.id,e.class_id,c.name AS class_name,e.start_date::text,e.end_date::text,e.end_reason FROM enrolments e JOIN class_sections c ON c.school_id=e.school_id AND c.id=e.class_id WHERE e.school_id=$1 AND e.learner_id=$2 ORDER BY e.start_date,e.id',[schoolId,id]);
+    return {...result.rows[0],enrolments:enrolments.rows};
+  }
+  transfer(client:PoolClient,actor:Actor,id:string,body:TransferDto) {
+    return command(client,actor,body.operationId,'learner.transfer',{id,...body},async()=>{
+      const learner=await this.learner(client,actor.schoolId,id,true);
+      if(learner.version!==body.version)throw new ConflictException('Learner changed. Reload before transferring');
+      const current=learner.enrolments.find((row:any)=>row.end_date===null);
+      if(!current)throw new ConflictException('No open enrolment to transfer');
+      if(body.effectiveDate<=current.start_date)throw new BadRequestException('Transfer must follow the current enrolment start');
+      if(current.class_id===body.classId)throw new BadRequestException('Choose a different class');
+      // Stable class lock order prevents opposite-direction transfers deadlocking.
+      await client.query('SELECT id FROM class_sections WHERE school_id=$1 AND id=ANY($2::uuid[]) ORDER BY id FOR UPDATE',[actor.schoolId,[current.class_id,body.classId]]);
+      const destination=await this.classForDate(client,actor.schoolId,body.classId,body.effectiveDate);
+      await client.query('UPDATE enrolments SET end_date=$1,end_reason=$2 WHERE school_id=$3 AND id=$4',[body.effectiveDate,body.reason,actor.schoolId,current.id]);
+      await this.ensureCapacity(client,actor,destination,body.effectiveDate,body.capacityOverrideReason);
+      await client.query('INSERT INTO enrolments(id,school_id,learner_id,class_id,start_date) VALUES($1,$2,$3,$4,$5)',[randomUUID(),actor.schoolId,id,body.classId,body.effectiveDate]);
+      await client.query('UPDATE learners SET version=version+1 WHERE school_id=$1 AND id=$2',[actor.schoolId,id]);
+      await audit(client,actor,'learner.transferred',id,{effectiveDate:body.effectiveDate,fromClassId:current.class_id,toClassId:body.classId,reason:body.reason});
+      if(body.capacityOverrideReason)await audit(client,actor,'class.capacity.override',body.classId,{reason:body.capacityOverrideReason,learnerId:id});
+      return this.learner(client,actor.schoolId,id);
+    });
+  }
+}

@@ -222,3 +222,5 @@ node_modules/
 *.tsbuildinfo
 playwright-report/
 test-results/
+!frontend/src/lib/
+!frontend/src/lib/**

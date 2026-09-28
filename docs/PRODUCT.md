@@ -51,7 +51,7 @@ Targets are agreed after baseline. Attendance or product usage alone does not pr
 
 ## 5. Build order and acceptance
 
-All milestones are unstarted. Authorization to implement is still required.
+Evans authorized P1–P4 implementation and disposable local migrations on 2026-09-28. Current completion and verification evidence is tracked in [STATUS.md](../STATUS.md); provider and school acceptance remain separate gates.
 
 | Phase | Deliverable | Exit evidence |
 | --- | --- | --- |
@@ -67,7 +67,7 @@ Each task implements a small complete workflow through UI, API and database. Do 
 
 ## 6. Decisions for Evans
 
-Accepted backend stack: **Node.js + TypeScript + NestJS + PostgreSQL**, in one modular backend codebase with API and worker processes. React/Vite remains the frontend proposal. Implementation still awaits authorization.
+Accepted stack: **React/TypeScript, Node.js + TypeScript + NestJS + PostgreSQL**, in one modular backend codebase with API and worker processes. Implementation through P1–P4 is authorized; external provider and pilot decisions remain open.
 
 The following recommendations remain for review:
 

@@ -16,3 +16,5 @@ jobs:
       - run: npm run db:start
       - run: npm run db:migrate && npm run seed -w backend
       - run: npm run build && npm test
+      - run: npx playwright install --with-deps chromium
+      - run: npm run test:browser

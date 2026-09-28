@@ -3,11 +3,12 @@
   "private": true,
   "version": "0.1.0",
   "scripts": {
+    "worker": "npm run build && node dist/jobs/worker.js",
     "build": "tsc -p tsconfig.json",
     "dev": "npm run build && node --watch dist/main.js",
     "migrate": "tsx scripts/migrate.ts",
     "seed": "tsx scripts/seed.ts",
-    "test": "npm run build && tsx --test tests/*.test.ts"
+    "test": "npm run build && tsx --test --test-concurrency=1 tests/*.test.ts"
   },
   "dependencies": {
     "@nestjs/common": "11.2.6",

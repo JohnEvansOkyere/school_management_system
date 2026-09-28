@@ -29,14 +29,18 @@ npm run seed -w backend
 DEV_AUTH=synthetic-local npm run dev:api
 # In another terminal:
 npm run dev:web
+# For durable export jobs, in a third terminal:
+npm run dev:worker
 ```
 
-Open `http://127.0.0.1:5178`. Synthetic accounts: `head@example.test`, `teacher@example.test`, `guardian@example.test`; password `Synthetic-only-2026!`. The headteacher belongs to two synthetic schools. Sessions use HttpOnly cookies and write CSRF tokens. Synthetic login is explicitly opt-in and loopback-only; managed OIDC/MFA is not implemented. Production database startup is blocked.
+Open `http://127.0.0.1:5178`. Synthetic accounts: `head@example.test`, `frontdesk@example.test`, `teacher@example.test`, `guardian@example.test`; password `Synthetic-only-2026!`. The seeded headteacher belongs to two synthetic schools; API tests add isolated synthetic school fixtures. Sessions use HttpOnly cookies and write CSRF tokens. Synthetic login is explicitly opt-in and loopback-only; managed OIDC/MFA is not implemented. Production database startup is blocked.
 
 ```bash
 npm run build
 npm test
+npx playwright install chromium
+npm run test:browser
 npm audit
 ```
 
-Checks use the disposable database and synthetic fixtures. See STATUS.md for verified features and remaining milestone gates. The GitHub workflow runs local builds/API/database checks; it does not deploy. Browser evidence is captured locally under `.local/` and must be recorded separately from CI results.
+Checks use the disposable database and synthetic fixtures. API tests deliberately expire/revoke fixture sessions; run them before browser checks. Browser tests exercise school setup, admission review/enrolment, transfer history/reload, exports and denied teacher administration. They launch API/web servers if absent and may reuse this project's already-running local servers. See STATUS.md for verified features and remaining milestone gates. CI builds and tests; it does not deploy. Local screenshots/downloads stay under `.local/`; failing browser traces stay under ignored `test-results/`.
