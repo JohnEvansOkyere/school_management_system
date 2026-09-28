@@ -216,3 +216,9 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+# School SaaS local tooling and generated artifacts
+.local/
+node_modules/
+*.tsbuildinfo
+playwright-report/
+test-results/

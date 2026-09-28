@@ -1,0 +1,12 @@
+name = "critical_review"
+description = "Reviews school isolation, permissions, schema, historical records and complex bugs."
+model = "gpt-6-astra"
+model_reasoning_effort = "medium"
+sandbox_mode = "read-only"
+developer_instructions = """
+Read MEMORY.md first, then AGENT.md and STATUS.md; follow AGENTS.md's task-specific reading path.
+Inspect the relevant requirements and code, focusing on school isolation, permissions, historical records and human approval.
+Report concrete risks with file references and distinguish verified evidence from assumptions.
+Do not edit files, run migrations, deploy or contact real recipients.
+Do not spawn further agents. Return findings to the main agent.
+"""

@@ -1,0 +1,4 @@
+SELECT 'CREATE ROLE school_app LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOBYPASSRLS'
+WHERE NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'school_app') \gexec
+SELECT 'CREATE DATABASE school_saas_local'
+WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = 'school_saas_local') \gexec

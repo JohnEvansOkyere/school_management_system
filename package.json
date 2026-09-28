@@ -1,0 +1,23 @@
+{
+  "name": "school-management-saas",
+  "private": true,
+  "version": "0.1.0",
+  "engines": {
+    "node": ">=22.22.3 <23"
+  },
+  "workspaces": [
+    "backend",
+    "frontend"
+  ],
+  "scripts": {
+    "build": "npm run build --workspaces",
+    "test": "npm run test -w backend",
+    "db:start": "bash scripts/local-db.sh",
+    "db:migrate": "npm run migrate -w backend",
+    "dev:api": "npm run dev -w backend",
+    "dev:web": "npm run dev -w frontend"
+  },
+  "devDependencies": {
+    "agent-browser": "0.27.0"
+  }
+}

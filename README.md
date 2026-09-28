@@ -1,0 +1,42 @@
+# Ghana School Management SaaS
+
+**Implementation authorized · 28 September 2026 · Local synthetic development.**
+
+An AI native service for Ghanaian Nursery, KG, Primary and JHS schools, designed to accommodate SHS later.
+
+## Review guide
+
+| Document | Purpose |
+| --- | --- |
+| [Product](docs/PRODUCT.md) | Scope, educational value, build order and decisions to review |
+| [Architecture](docs/ARCHITECTURE.md) | Proposed stack, tenancy, data, security, AI and operations |
+| [Domain rules](docs/DOMAIN_RULES.md) | Rules and acceptance cases for each school workflow |
+| [Research](docs/RESEARCH.md) | Ghana evidence, source limitations and demo findings |
+
+For agents: [AGENTS.md](AGENTS.md) gives a short reading path. Agents should **not read every document each session**. [STATUS.md](STATUS.md) records actual progress; [MEMORY.md](MEMORY.md) records significant decisions. Your original instructions remain in [AGENT.md](AGENT.md).
+
+The separate client demo remains untouched; its code and fixtures have not been imported. Original agent instructions remain preserved. Evans authorized P1–P4 implementation and disposable local migrations, followed by feature pushes to GitHub. Deployment, shared databases and real communications require separate authorization.
+
+## Local development
+
+Requires Node.js 22.22.3, npm and PostgreSQL binaries (`pg_config` on PATH). The tooling creates only `.local/postgres`, a disposable cluster with a private Unix socket and no TCP listener. It never accepts a shared database URL. Local trust authentication is confined to this synthetic cluster and is not a production setup.
+
+```bash
+npm ci --ignore-scripts
+npm run db:start
+npm run db:migrate
+npm run seed -w backend
+DEV_AUTH=synthetic-local npm run dev:api
+# In another terminal:
+npm run dev:web
+```
+
+Open `http://127.0.0.1:5178`. Synthetic accounts: `head@example.test`, `teacher@example.test`, `guardian@example.test`; password `Synthetic-only-2026!`. The headteacher belongs to two synthetic schools. Sessions use HttpOnly cookies and write CSRF tokens. Synthetic login is explicitly opt-in and loopback-only; managed OIDC/MFA is not implemented. Production database startup is blocked.
+
+```bash
+npm run build
+npm test
+npm audit
+```
+
+Checks use the disposable database and synthetic fixtures. See STATUS.md for verified features and remaining milestone gates. The GitHub workflow runs local builds/API/database checks; it does not deploy. Browser evidence is captured locally under `.local/` and must be recorded separately from CI results.
