@@ -8,16 +8,30 @@ export function localConfig(owner = false) {
 
 export function supabaseConfig() {
   const connectionString = process.env.DATABASE_URL;
-  if (!connectionString) throw new Error('DATABASE_URL is required when DATABASE_TARGET=supabase');
-  let url: URL;
-  try { url = new URL(connectionString); } catch { throw new Error('DATABASE_URL must be a valid PostgreSQL connection URL'); }
-  if (url.protocol !== 'postgres:' && url.protocol !== 'postgresql:') throw new Error('DATABASE_URL must use the PostgreSQL protocol');
-  const role = decodeURIComponent(url.username);
-  if (!/^school_app(?:\.[a-z0-9]+)?$/i.test(role)) throw new Error('Supabase runtime connections must use the restricted school_app database role');
-  if (url.searchParams.get('sslmode') !== 'verify-full' || !url.searchParams.get('sslrootcert')) {
-    throw new Error('Supabase DATABASE_URL must use sslmode=verify-full and provide sslrootcert');
+  return supabaseRoleConfig(connectionString,'DATABASE_URL','school_app','school-management-api');
+}
+
+export function workerDatabaseConfig() {
+  const target = process.env.DATABASE_TARGET ?? (process.env.NODE_ENV === 'production' ? 'supabase' : 'local');
+  if (target === 'local') {
+    if (process.env.NODE_ENV === 'production') throw new Error('Production requires DATABASE_TARGET=supabase');
+    return {...localConfig(),user:'school_worker',application_name:'school-management-worker'};
   }
-  return { connectionString, max: 5, application_name: 'school-management-api' };
+  if (target !== 'supabase') throw new Error('DATABASE_TARGET must be local or supabase');
+  return supabaseRoleConfig(process.env.WORKER_DATABASE_URL,'WORKER_DATABASE_URL','school_worker','school-management-worker');
+}
+
+function supabaseRoleConfig(connectionString:string|undefined,variable:string,expectedRole:string,applicationName:string) {
+  if (!connectionString) throw new Error(`${variable} is required when DATABASE_TARGET=supabase`);
+  let url: URL;
+  try { url = new URL(connectionString); } catch { throw new Error(`${variable} must be a valid PostgreSQL connection URL`); }
+  if (url.protocol !== 'postgres:' && url.protocol !== 'postgresql:') throw new Error(`${variable} must use the PostgreSQL protocol`);
+  const role = decodeURIComponent(url.username);
+  if (!new RegExp(`^${expectedRole}(?:\\.[a-z0-9]+)?$`,'i').test(role)) throw new Error(`Supabase connections in ${variable} must use the restricted ${expectedRole} database role`);
+  if (url.searchParams.get('sslmode') !== 'verify-full' || !url.searchParams.get('sslrootcert')) {
+    throw new Error(`Supabase ${variable} must use sslmode=verify-full and provide sslrootcert`);
+  }
+  return { connectionString, max: 5, application_name: applicationName };
 }
 
 export function appDatabaseConfig() {

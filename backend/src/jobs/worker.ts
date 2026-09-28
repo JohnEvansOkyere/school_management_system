@@ -1,9 +1,9 @@
 import { Pool, PoolClient } from 'pg';
 import { randomUUID } from 'node:crypto';
-import { localConfig } from '../core/database';
+import { workerDatabaseConfig } from '../core/database';
 
 export class JobWorker {
-  readonly pool = new Pool({...localConfig(),user:'school_worker'});
+  readonly pool = new Pool(workerDatabaseConfig());
   async transaction<T>(work:(client:PoolClient)=>Promise<T>) {
     const client=await this.pool.connect();
     try{await client.query('BEGIN');const result=await work(client);await client.query('COMMIT');return result;}
