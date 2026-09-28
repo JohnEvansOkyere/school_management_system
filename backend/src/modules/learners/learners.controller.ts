@@ -2,7 +2,7 @@ import { Body,Controller,Get,Param,ParseUUIDPipe,Post,Query,Req } from '@nestjs/
 import { Request } from 'express';
 import { Access } from '../../core/access';
 import { LearnersService } from './learners.service';
-import { AdmissionDto,ClassDto,PageDto,TransferDto,TransitionDto,YearDto } from './learners.dto';
+import { AdmissionDto,ClassDto,PageDto,TransferDto,TransitionDto,WithdrawalDto,YearDto } from './learners.dto';
 const staff=['headteacher','frontdesk'];
 @Controller('api/v1/schools/:schoolId')
 export class LearnersController {
@@ -27,4 +27,6 @@ export class LearnersController {
   detail(@Req() req:Request,@Param('schoolId',new ParseUUIDPipe()) schoolId:string,@Param('id',new ParseUUIDPipe()) id:string){return this.access.school(req,schoolId,staff,client=>this.learners.learner(client,schoolId,id));}
   @Post('learners/:id/transfer')
   transfer(@Req() req:Request,@Param('schoolId',new ParseUUIDPipe()) schoolId:string,@Param('id',new ParseUUIDPipe()) id:string,@Body() body:TransferDto){return this.access.school(req,schoolId,staff,(client,actor)=>this.learners.transfer(client,actor,id,body),true);}
+  @Post('learners/:id/withdraw')
+  withdraw(@Req() req:Request,@Param('schoolId',new ParseUUIDPipe()) schoolId:string,@Param('id',new ParseUUIDPipe()) id:string,@Body() body:WithdrawalDto){return this.access.school(req,schoolId,staff,(client,actor)=>this.learners.withdraw(client,actor,id,body),true);}
 }

@@ -126,3 +126,58 @@ test('future arrivals reserve capacity and same-date departures release it',asyn
 test('database composite foreign keys reject cross-school learner/class links',async()=>{
   const learner=await enrolled();await assert.rejects(owner.query('INSERT INTO enrolments(id,school_id,learner_id,class_id,start_date) VALUES($1,$2,$3,$4,$5)',[randomUUID(),other,learner.learner_id,section.id,'2026-09-01']),/foreign key/);
 });
+test('withdrawal preserves history, replays once and releases capacity on its exclusive end date',async()=>{
+  const target=await post('/classes',{name:'Withdrawal capacity',level:'Primary',capacity:1,academicYearId:year.id});
+  const record=await enrolled(target.id),url=`/learners/${record.learner_id}/withdraw`;
+  const before=await (await call(`/learners/${record.learner_id}`)).json();
+  const body={operationId:randomUUID(),version:1,effectiveDate:'2026-10-01',reason:'Reviewed synthetic school departure'};
+  const frontdesk=await login('frontdesk@example.test');const result=await post(url,body,201,frontdesk),replay=await post(url,body,201,frontdesk);
+  assert.deepEqual(replay,result);assert.equal(result.version,2);assert.equal(result.enrolments.length,1);
+  assert.deepEqual(result.enrolments[0],{...before.enrolments[0],end_date:body.effectiveDate,end_reason:body.reason});
+  assert.equal((await owner.query("SELECT count(*) FROM audit_events WHERE target_id=$1 AND action='learner.withdrawn'",[record.learner_id])).rows[0].count,'1');
+  await post(url,{...body,operationId:randomUUID(),version:2},409,frontdesk);
+  const early=await accepted(target.id,'2026-09-30');await post(`/admissions/${early.id}/transition`,{version:early.version,action:'enrol'},409);
+  const replacement=await accepted(target.id,'2026-10-01');await post(`/admissions/${replacement.id}/transition`,{version:replacement.version,action:'enrol'});
+});
+test('withdrawal rejects unauthorized actors, invalid dates, missing reasons and stale versions',async()=>{
+  const record=await enrolled(),url=`/learners/${record.learner_id}/withdraw`,body={version:1,effectiveDate:'2026-10-01',reason:'Reviewed departure'};
+  for(const email of ['teacher@example.test','guardian@example.test'])await post(url,body,403,await login(email));
+  await post(url,{...body,effectiveDate:'2026-09-01'},400);await post(url,{...body,effectiveDate:'2026-02-30'},400);
+  await post(url,{version:1,effectiveDate:'2026-10-01'},400);await post(url,{...body,version:2},409);
+  const cross=await fetch(`${base}/schools/${other}${url}`,{method:'POST',headers:{cookie:account.cookie,'content-type':'application/json','x-csrf-token':account.csrf},body:JSON.stringify({operationId:randomUUID(),...body})});assert.equal(cross.status,404);
+  const fresh=await (await call(`/learners/${record.learner_id}`)).json();assert.equal(fresh.version,1);assert.equal(fresh.enrolments[0].end_date,null);
+});
+test('withdrawal and transfer racing on one version commit exactly one historical change',async()=>{
+  const record=await enrolled(),root=`/learners/${record.learner_id}`;
+  const replies=await Promise.all([call(`${root}/withdraw`,'POST',{operationId:randomUUID(),version:1,effectiveDate:'2026-10-01',reason:'Concurrent departure'}),call(`${root}/transfer`,'POST',{operationId:randomUUID(),version:1,classId:destination.id,effectiveDate:'2026-10-01',reason:'Concurrent transfer'})]);
+  assert.deepEqual(replies.map(row=>row.status).sort(),[201,409]);
+  const fresh=await (await call(root)).json();assert.equal(fresh.version,2);
+  const events=await owner.query("SELECT action FROM audit_events WHERE target_id=$1 AND action IN ('learner.withdrawn','learner.transferred')",[record.learner_id]);assert.equal(events.rowCount,1);
+});
+test('failed withdrawal audit rolls back supersession, replacement, version and command receipt',async()=>{
+  const record=await enrolled(),root=`/learners/${record.learner_id}`;
+  const before=await post(`${root}/transfer`,{version:1,classId:destination.id,effectiveDate:'2026-11-01',reason:'Original rollback schedule'});
+  const body={operationId:randomUUID(),version:2,effectiveDate:'2026-10-01',reason:'Audit rollback departure'};
+  await owner.query("ALTER TABLE audit_events ADD CONSTRAINT synthetic_withdrawal_failure CHECK(action<>'learner.withdrawn') NOT VALID");
+  try{
+    await post(`${root}/withdraw`,body,500);const fresh=await (await call(root)).json();assert.deepEqual(fresh,before);
+    assert.equal((await owner.query('SELECT count(*) FROM command_receipts WHERE school_id=$1 AND id=$2',[school,body.operationId])).rows[0].count,'0');
+  }finally{await owner.query('ALTER TABLE audit_events DROP CONSTRAINT synthetic_withdrawal_failure');}
+  await post(`${root}/withdraw`,body);
+});
+test('withdrawal before or on a scheduled transfer supersedes plans without rewriting originals',async()=>{
+  for(const date of ['2026-10-01','2026-11-01']) {
+    const target=await post('/classes',{name:`Cancelled transfer ${date}`,level:'Primary',capacity:1,academicYearId:year.id});
+    const record=await enrolled(),root=`/learners/${record.learner_id}`;
+    const scheduled=await post(`${root}/transfer`,{version:1,classId:target.id,effectiveDate:'2026-11-01',reason:'Original scheduled move'});
+    await assert.rejects(owner.query("UPDATE enrolments SET superseded_at=now(),supersession_reason='Invalid combined edit',end_date='2026-12-01',end_reason='Rewritten input' WHERE id=$1",[scheduled.enrolments[1].id]),/preserve original/);
+    const body={operationId:randomUUID(),version:2,effectiveDate:date,reason:'Reviewed departure before planned class'};
+    const result=await post(`${root}/withdraw`,body),replay=await post(`${root}/withdraw`,body);assert.deepEqual(replay,result);
+    const effective=result.enrolments.filter(row=>!row.superseded_at);assert.equal(effective.length,1);assert.equal(effective[0].end_date,date);assert.equal(effective[0].class_id,section.id);
+    const future=result.enrolments.find(row=>row.id===scheduled.enrolments[1].id);assert.ok(future.superseded_at);assert.equal(future.start_date,'2026-11-01');assert.equal(future.end_date,null);
+    const original=result.enrolments.find(row=>row.id===scheduled.enrolments[0].id);assert.equal(original.end_date,'2026-11-01');assert.equal(original.end_reason,'Original scheduled move');
+    if(date==='2026-10-01'){assert.ok(original.superseded_at);await assert.rejects(owner.query('UPDATE enrolments SET superseded_at=NULL,supersession_reason=NULL WHERE id=$1',[original.id]),/immutable/);}
+    await enrolled(target.id); // cancelled future reservations no longer consume capacity
+    await post(`${root}/transfer`,{version:result.version,classId:destination.id,effectiveDate:'2026-12-01',reason:'Cannot reopen withdrawn plan'},409);
+  }
+});

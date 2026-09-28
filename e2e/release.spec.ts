@@ -29,6 +29,11 @@ test('admission decisions, enrolment, transfer and reload preserve history',asyn
   await expect(history).toContainText('Synthetic browser transfer review');await expect(history).toContainText(second);await expect(history).toContainText('Scheduled');
   await page.setViewportSize({width:375,height:812});await expect(page.getByRole('button',{name:'Record transfer',exact:true})).toBeVisible();expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);
   await history.scrollIntoViewIfNeeded();await page.screenshot({path:'.local/admissions-mobile.png'});expect(errors).toEqual([]);
+  await page.getByRole('button',{name:'Withdraw learner',exact:true}).click();await page.getByLabel('Withdrawal date (first day out of class)',{exact:true}).fill('2026-09-29');await page.getByLabel('Withdrawal reason',{exact:true}).fill('Synthetic reviewed school departure');await page.getByRole('button',{name:'Record withdrawal',exact:true}).click();
+  await expect(page.getByRole('status').filter({hasText:'Withdrawal recorded.'})).toBeVisible();await expect(page.getByRole('button',{name:'Record transfer',exact:true})).toHaveCount(0);
+  await page.reload();await page.getByRole('combobox',{name:'School',exact:true}).selectOption(school);await page.getByRole('combobox',{name:'Find a learner',exact:true}).selectOption({label:`${name} · ${admission}`});
+  await expect(page.locator('li').filter({hasText:'Synthetic reviewed school departure'}).filter({hasText:'2026-09-29'})).toHaveCount(1);await expect(page.locator('li').filter({hasText:second}).filter({hasText:'Superseded'})).toHaveCount(1);await expect(page.locator('li').filter({hasText:'Synthetic browser transfer review'})).toContainText(first);
+  await expect(page.getByText('No open enrolment. Previous learner and class records are retained.',{exact:true})).toBeVisible();await expect(page.getByRole('button',{name:'Withdraw learner',exact:true})).toHaveCount(0);expect(errors).toEqual([]);
 });
 test('authorized audit export is generated and downloaded with tenant-scoped records',async({page})=>{
   await signIn(page);await page.getByRole('button',{name:'Export audit history',exact:true}).click();await page.getByRole('button',{name:'Prepare export',exact:true}).click();await expect(page.getByRole('button',{name:'Check export progress',exact:true})).toBeVisible();

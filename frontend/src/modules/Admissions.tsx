@@ -7,7 +7,7 @@ type SchoolClass = { id: string; name: string; level: 'Nursery' | 'KG' | 'Primar
 type Admission = { id: string; full_name: string; date_of_birth?: string | null; status: string; class_id: string; class_name: string; start_date: string; admission_number: string; version: number; learner_id?: string | null; decision_reason?: string | null };
 type Learner = { id: string; full_name: string; admission_number: string; date_of_birth?: string | null; version: number };
 type Page<T> = { items: T[]; total: number; offset: number; limit: number };
-type Enrolment = { id: string; class_id: string; class_name: string; start_date: string; end_date?: string | null; end_reason?: string | null };
+type Enrolment = { id: string; class_id: string; class_name: string; start_date: string; end_date?: string | null; end_reason?: string | null; superseded_at?:string | null; supersession_reason?:string | null };
 type LearnerDetail = Learner & { enrolments: Enrolment[] };
 type Props = { schoolId: string; csrfToken: string; role: Role };
 
@@ -39,6 +39,8 @@ export function Admissions({ schoolId, csrfToken, role }: Props) {
   const [reviewReason, setReviewReason] = useState<Record<string, string>>({});
   const [overrideReasons, setOverrideReasons] = useState<Record<string, string>>({});
   const [transfer, setTransfer] = useState({ classId: '', effectiveDate: dateToday(), reason: '' });
+  const [withdrawalOpen,setWithdrawalOpen]=useState(false);
+  const [withdrawal,setWithdrawal]=useState({effectiveDate:dateToday(),reason:''});
   const [application, setApplication] = useState({ fullName: '', dateOfBirth: '', classId: '', startDate: dateToday(), admissionNumber: '' });
   const [newYear, setNewYear] = useState({ name: '', startDate: '', endDate: '' });
   const [newClass, setNewClass] = useState({ name: '', level: 'Primary' as SchoolClass['level'], capacity: '', academicYearId: '' });
@@ -92,6 +94,7 @@ export function Admissions({ schoolId, csrfToken, role }: Props) {
     const epoch = ++learnerEpoch.current;
     detailEpoch.current++;selectedLearnerRef.current=selectedLearner;
     setDetail(null);
+    setWithdrawalOpen(false);setWithdrawal({effectiveDate:dateToday(),reason:''});
     if (!selectedLearner) return;
     void request<LearnerDetail>(`/schools/${schoolId}/learners/${selectedLearner}`).then(row => {
       if (alive.current && learnerEpoch.current === epoch) setDetail(row);
@@ -153,6 +156,12 @@ export function Admissions({ schoolId, csrfToken, role }: Props) {
     if (await send(`transfer:${detail.id}`, payload, `/schools/${schoolId}/learners/${detail.id}/transfer`, 'Transfer recorded. Previous enrolment history is retained.')) setTransfer({ classId: '', effectiveDate: dateToday(), reason: '' });
   }
 
+  async function withdrawLearner(event:React.FormEvent) {
+    event.preventDefault();if(!detail)return;
+    const payload={version:detail.version,effectiveDate:withdrawal.effectiveDate,reason:withdrawal.reason.trim()};
+    if(await send(`withdraw:${detail.id}`,payload,`/schools/${schoolId}/learners/${detail.id}/withdraw`,'Withdrawal recorded. Learner and class history are retained.'))setWithdrawalOpen(false);
+  }
+
   function actionsFor(row: Admission) {
     if (row.status === 'application') return ['review'];
     if (row.status === 'review') return ['offer', 'waitlist', 'decline'];
@@ -203,13 +212,19 @@ export function Admissions({ schoolId, csrfToken, role }: Props) {
       <div className="actions" aria-label="Learner pages"><button type="button" className="secondary" disabled={busy || learnersOffset === 0} onClick={() => setLearnersOffset(Math.max(0, learnersOffset - 25))}>Previous learners</button><span className="muted">{learnersTotal === 0 ? '0 learners' : `Showing ${learnersOffset + 1}–${Math.min(learnersOffset + learners.length, learnersTotal)} of ${learnersTotal} learners`}</span><button type="button" className="secondary" disabled={busy || learnersOffset + learners.length >= learnersTotal} onClick={() => setLearnersOffset(learnersOffset + 25)}>Next learners</button></div>
       {selectedLearner && !detail ? <p role="status">Loading learner history…</p> : detail && <div>
         <h4>{detail.full_name}</h4><p className="muted">Admission number {detail.admission_number}{detail.date_of_birth ? ` · Date of birth ${detail.date_of_birth}` : ''}</p>
-        <h4>Class history</h4>{detail.enrolments.length ? <ul className="history">{detail.enrolments.map(row => <li key={row.id}><strong>{row.class_name}</strong><span>{row.start_date}{row.end_date ? ` to ${row.end_date} (end exclusive)` : ' · Open-ended'} · {row.start_date > dateToday() ? 'Scheduled' : row.end_date && row.end_date <= dateToday() ? 'Ended' : 'Active today'}{row.end_reason ? ` · ${row.end_reason}` : ''}</span></li>)}</ul> : <p>No enrolments recorded.</p>}
-        <form onSubmit={transferLearner}><h4>Transfer to another class</h4>
-          <label>New class<select value={transfer.classId} onChange={e => setTransfer({ ...transfer, classId: e.target.value })} required><option value="">Choose a class</option>{classes.filter(c => !detail.enrolments.some(enrolment => enrolment.class_id === c.id && !enrolment.end_date)).map(c => <option key={c.id} value={c.id}>{c.name} · {c.level} · {c.year_name}</option>)}</select></label>
+        <h4>Class history</h4>{detail.enrolments.length ? <ul className="history">{detail.enrolments.map(row => <li key={row.id}><strong>{row.class_name}</strong><span>{row.start_date}{row.end_date ? ` to ${row.end_date} (end exclusive)` : ' · Open-ended'} · {row.superseded_at ? `Superseded · ${row.supersession_reason}` : row.start_date > dateToday() ? 'Scheduled' : row.end_date && row.end_date <= dateToday() ? 'Ended' : 'Active today'}{row.end_reason ? ` · ${row.end_reason}` : ''}</span></li>)}</ul> : <p>No enrolments recorded.</p>}
+        {detail.enrolments.some(row=>!row.end_date&&!row.superseded_at) ? <><form onSubmit={transferLearner}><h4>Transfer to another class</h4>
+          <label>New class<select value={transfer.classId} onChange={e => setTransfer({ ...transfer, classId: e.target.value })} required><option value="">Choose a class</option>{classes.filter(c => !detail.enrolments.some(enrolment => enrolment.class_id === c.id && !enrolment.end_date && !enrolment.superseded_at)).map(c => <option key={c.id} value={c.id}>{c.name} · {c.level} · {c.year_name}</option>)}</select></label>
           <label>Effective date<input type="date" value={transfer.effectiveDate} onChange={e => setTransfer({ ...transfer, effectiveDate: e.target.value })} required/></label>
           <label>Transfer reason<input value={transfer.reason} onChange={e => setTransfer({ ...transfer, reason: e.target.value })} required maxLength={500}/></label>
           <button disabled={busy || !transfer.classId}>Record transfer</button>
         </form>
+        <button type="button" className="secondary" aria-expanded={withdrawalOpen} disabled={busy} onClick={()=>setWithdrawalOpen(!withdrawalOpen)}>Withdraw learner</button>
+        {withdrawalOpen&&<form onSubmit={withdrawLearner}><h4>Record withdrawal</h4><p className="muted">The learner leaves this class on the selected date. Previous records remain available. Scheduled transfers on or after this date are superseded, with their original history retained.</p>
+          <label>Withdrawal date (first day out of class)<input type="date" value={withdrawal.effectiveDate} onChange={e=>setWithdrawal({...withdrawal,effectiveDate:e.target.value})} required/></label>
+          <label>Withdrawal reason<input value={withdrawal.reason} onChange={e=>setWithdrawal({...withdrawal,reason:e.target.value})} required minLength={3} maxLength={500}/></label>
+          <button disabled={busy}>Record withdrawal</button>
+        </form>}</> : <p>No open enrolment. Previous learner and class records are retained.</p>}
       </div>}
 
       {role === 'headteacher' && <div><button type="button" className="secondary" aria-expanded={setupOpen} onClick={()=>setSetupOpen(!setupOpen)}>School setup: academic years and classes</button>{setupOpen&&<div>

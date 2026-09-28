@@ -3,7 +3,7 @@ import { PoolClient } from 'pg';
 import { randomUUID } from 'node:crypto';
 import { Actor } from '../../core/access';
 import { audit,command } from '../../core/commands';
-import { AdmissionDto,ClassDto,PageDto,TransferDto,TransitionDto,YearDto } from './learners.dto';
+import { AdmissionDto,ClassDto,PageDto,TransferDto,TransitionDto,WithdrawalDto,YearDto } from './learners.dto';
 @Injectable()
 export class LearnersService {
   async page(client:PoolClient,schoolId:string,table:'learners'|'admissions',page:PageDto) {
@@ -25,7 +25,7 @@ export class LearnersService {
   }
   async ensureCapacity(client:PoolClient,actor:Actor,section:any,start:string,override?:string) {
     // Every class write takes this class lock. Check the entire remaining year, including scheduled transfers.
-    const events=await client.query("SELECT start_date::text AS date,1 AS delta FROM enrolments WHERE school_id=$1 AND class_id=$2 AND start_date<$4 AND (end_date IS NULL OR end_date>$3) UNION ALL SELECT end_date::text AS date,-1 AS delta FROM enrolments WHERE school_id=$1 AND class_id=$2 AND end_date>$3 AND end_date<$4 ORDER BY date,delta",[actor.schoolId,section.id,start,section.end_date]);
+    const events=await client.query("SELECT start_date::text AS date,1 AS delta FROM enrolments WHERE school_id=$1 AND class_id=$2 AND superseded_at IS NULL AND start_date<$4 AND (end_date IS NULL OR end_date>$3) UNION ALL SELECT end_date::text AS date,-1 AS delta FROM enrolments WHERE school_id=$1 AND class_id=$2 AND superseded_at IS NULL AND end_date>$3 AND end_date<$4 ORDER BY date,delta",[actor.schoolId,section.id,start,section.end_date]);
     let occupancy=0,maxOccupancy=0;
     // Existing enrolments that started before the new start contribute to initial occupancy.
     for(const event of events.rows){occupancy+=event.delta;maxOccupancy=Math.max(maxOccupancy,occupancy);}
@@ -85,14 +85,39 @@ export class LearnersService {
   async learner(client:PoolClient,schoolId:string,id:string,lock=false) {
     const result=await client.query(`SELECT id,full_name,admission_number,date_of_birth::text,version FROM learners WHERE school_id=$1 AND id=$2${lock?' FOR UPDATE':''}`,[schoolId,id]);
     if(!result.rowCount)throw new NotFoundException('Learner unavailable');
-    const enrolments=await client.query('SELECT e.id,e.class_id,c.name AS class_name,e.start_date::text,e.end_date::text,e.end_reason FROM enrolments e JOIN class_sections c ON c.school_id=e.school_id AND c.id=e.class_id WHERE e.school_id=$1 AND e.learner_id=$2 ORDER BY e.start_date,e.id',[schoolId,id]);
+    const enrolments=await client.query('SELECT e.id,e.class_id,c.name AS class_name,e.start_date::text,e.end_date::text,e.end_reason,e.superseded_at,e.supersession_reason FROM enrolments e JOIN class_sections c ON c.school_id=e.school_id AND c.id=e.class_id WHERE e.school_id=$1 AND e.learner_id=$2 ORDER BY e.start_date,e.id',[schoolId,id]);
     return {...result.rows[0],enrolments:enrolments.rows};
+  }
+  withdraw(client:PoolClient,actor:Actor,id:string,body:WithdrawalDto) {
+    return command(client,actor,body.operationId,'learner.withdraw',{id,...body},async()=>{
+      const learner=await this.learner(client,actor.schoolId,id,true);
+      if(learner.version!==body.version)throw new ConflictException('Learner changed. Reload before withdrawing');
+      const active=learner.enrolments.filter((row:any)=>!row.superseded_at);
+      if(!active.some((row:any)=>row.end_date===null))throw new ConflictException('No open enrolment to withdraw');
+      if(body.effectiveDate<=active[0].start_date)throw new BadRequestException('Withdrawal must follow the first enrolment start');
+      const affected=active.filter((row:any)=>!row.end_date||row.end_date>body.effectiveDate);
+      // Stable class locks serialize supersession with capacity and opposite transfers.
+      await client.query('SELECT id FROM class_sections WHERE school_id=$1 AND id=ANY($2::uuid[]) ORDER BY id FOR UPDATE',[actor.schoolId,affected.map((row:any)=>row.class_id)]);
+      const supersededIds:string[]=[];
+      for(const row of affected) {
+        if(row.start_date<body.effectiveDate&&row.end_date===null) {
+          await client.query('UPDATE enrolments SET end_date=$1,end_reason=$2 WHERE school_id=$3 AND id=$4',[body.effectiveDate,body.reason,actor.schoolId,row.id]);
+        }else{
+          await client.query('UPDATE enrolments SET superseded_at=now(),supersession_reason=$1 WHERE school_id=$2 AND id=$3',[body.reason,actor.schoolId,row.id]);
+          supersededIds.push(row.id);
+          if(row.start_date<body.effectiveDate)await client.query('INSERT INTO enrolments(id,school_id,learner_id,class_id,start_date,end_date,end_reason) VALUES($1,$2,$3,$4,$5,$6,$7)',[randomUUID(),actor.schoolId,id,row.class_id,row.start_date,body.effectiveDate,body.reason]);
+        }
+      }
+      await client.query('UPDATE learners SET version=version+1 WHERE school_id=$1 AND id=$2',[actor.schoolId,id]);
+      await audit(client,actor,'learner.withdrawn',id,{effectiveDate:body.effectiveDate,supersededIds,reason:body.reason});
+      return this.learner(client,actor.schoolId,id);
+    });
   }
   transfer(client:PoolClient,actor:Actor,id:string,body:TransferDto) {
     return command(client,actor,body.operationId,'learner.transfer',{id,...body},async()=>{
       const learner=await this.learner(client,actor.schoolId,id,true);
       if(learner.version!==body.version)throw new ConflictException('Learner changed. Reload before transferring');
-      const current=learner.enrolments.find((row:any)=>row.end_date===null);
+      const current=learner.enrolments.find((row:any)=>row.end_date===null&&!row.superseded_at);
       if(!current)throw new ConflictException('No open enrolment to transfer');
       if(body.effectiveDate<=current.start_date)throw new BadRequestException('Transfer must follow the current enrolment start');
       if(current.class_id===body.classId)throw new BadRequestException('Choose a different class');

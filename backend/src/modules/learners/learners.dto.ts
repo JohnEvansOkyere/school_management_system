@@ -37,3 +37,8 @@ export class TransferDto extends OperationDto {
   @IsString() @MinLength(3) @MaxLength(500) @Matches(/\S.{1,}\S/) reason!:string;
   @IsOptional() @IsString() @MinLength(3) @MaxLength(500) @Matches(/\S.{1,}\S/) capacityOverrideReason?:string;
 }
+export class WithdrawalDto extends OperationDto {
+  @IsInt() @Min(1) version!:number;
+  @IsDateString({strict:true}) @Matches(/^\d{4}-\d{2}-\d{2}$/) effectiveDate!:string;
+  @IsString() @MinLength(3) @MaxLength(500) @Matches(/\S.{1,}\S/) reason!:string;
+}
