@@ -16,6 +16,8 @@
     "test": "npm run test -w backend",
     "db:start": "bash scripts/local-db.sh",
     "db:migrate": "npm run migrate -w backend",
+    "db:migrate:supabase": "npm run migrate:supabase -w backend --",
+    "db:check:supabase": "npm run check:supabase -w backend",
     "dev:api": "npm run dev -w backend",
     "dev:web": "npm run dev -w frontend"
   },

@@ -10,13 +10,13 @@ Use a modular monolith: one Node.js/TypeScript backend codebase with NestJS API 
 | --- | --- | --- |
 | Web | React, Vite, TypeScript, React Router, Tailwind, accessible shared UI | Selective reuse of demo patterns; mobile school workflows |
 | API | Node.js, TypeScript and NestJS; validated DTOs and generated OpenAPI client types | Shared language with the frontend; explicit modules, validation and domain commands |
-| Data | PostgreSQL; TypeScript database access and migration tooling selected in P1 | Constraints, transactions, tenant isolation and migration history |
+| Data | Supabase-hosted PostgreSQL selected by Evans; TypeScript database access and reviewed migrations | Constraints, transactions, tenant isolation and migration history |
 | Identity | Managed OIDC; server session with Secure/HttpOnly cookie | Avoid custom password/MFA recovery infrastructure |
 | Jobs | PostgreSQL outbox/jobs and bounded worker | Durable reports, messages and AI runs without a broker initially |
 | Files | Private S3-compatible storage | Quarantine/scan, authorized expiring downloads |
 | AI | TypeScript server provider adapter and evaluated task templates | Data controls, permissions and budgets |
 
-The backend choice is accepted. Select a supported Node.js LTS release and compatible pinned dependencies during P1. Database tooling must support explicit transactions, tenant-local context, composite foreign keys and reviewed SQL/RLS migrations. Shared TypeScript types do not replace runtime request validation. Keep AI integrations in this backend initially. Exact providers remain open. Defer microservices, Kubernetes, separate vector infrastructure and an autonomous-agent framework.
+The backend choice is accepted. Use a supported Node.js LTS release and compatible pinned dependencies. Database tooling must support explicit transactions, tenant-local context, composite foreign keys and reviewed SQL/RLS migrations. Runtime connections use the restricted `school_app` role; migration credentials remain separate. Shared TypeScript types do not replace runtime request validation. Keep AI integrations in this backend initially. Identity, file storage, hosting, region and cost remain open. Defer microservices, Kubernetes, separate vector infrastructure and an autonomous-agent framework.
 
 ```mermaid
 flowchart LR
@@ -30,7 +30,7 @@ flowchart LR
     Hooks --> DB
 ```
 
-The diagram shows boundaries; payment initiation can call its adapter through the API. Host web and API under one origin where possible. Propose managed container services, managed PostgreSQL with point-in-time recovery and private storage. Vendor/region/cost remain open; measure Ghana latency and review data-processing arrangements.
+The diagram shows boundaries; payment initiation can call its adapter through the API. Host web and API under one origin where possible. Supabase provides the selected PostgreSQL service; hosting, storage, region and cost remain open. Measure Ghana latency and review data-processing arrangements.
 
 ## 2. Code and module boundaries
 
