@@ -5,7 +5,7 @@ type Props = { schoolId: string; csrfToken: string; role: string; accessRefresh:
 type ClassRow = { id: string; name: string; level?: string; year_name?: string };
 type Mark = 'unmarked' | 'present' | 'late' | 'absent' | 'excused';
 type Learner = { id: string; full_name: string; admission_number: string; mark: Mark };
-type Register = { id: string | null; status: 'draft' | 'submitted' | 'locked'; version: number; className: string; date: string; items: Learner[] };
+type Register = { id: string | null; status: 'draft' | 'submitted' | 'locked'; version: number; rosterSource: 'submission' | 'legacy_marks' | null; className: string; date: string; items: Learner[] };
 const today = () => new Date().toLocaleDateString('sv-SE', { timeZone: 'Africa/Accra' });
 
 export function Attendance({ schoolId, csrfToken, role, accessRefresh }: Props) {
@@ -23,6 +23,7 @@ export function Attendance({ schoolId, csrfToken, role, accessRefresh }: Props) 
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
+  const [correctionReason,setCorrectionReason]=useState('');
   const operations = useRef(new Map<string, string>());
   const classRequestEpoch = useRef(0);
   const lastAccessRefresh = useRef(accessRefresh);
@@ -64,7 +65,7 @@ export function Attendance({ schoolId, csrfToken, role, accessRefresh }: Props) 
   }, [day, schoolId]);
 
   useEffect(() => {
-    setRegister(null); setError('');
+    setRegister(null); setError(''); setCorrectionReason('');
     if (!classId) return;
     request<Register>(`/schools/${schoolId}/attendance/classes/${classId}/register?day=${day}`)
       .then(setRegister).catch(e => setError((e as Error).message));
@@ -81,6 +82,7 @@ export function Attendance({ schoolId, csrfToken, role, accessRefresh }: Props) 
       operations.current.delete(key); setRegister(current => current ? { ...current, ...result } : null);
       const labels: Record<string, string> = { save: 'saved as draft', submit: 'submitted', lock: 'locked', correct: 'corrected' };
       setNotice(`Attendance ${labels[String(payload.action)] ?? 'saved'}.`);
+      if(payload.action==='correct')setCorrectionReason('');
     } catch (e) { setError((e as Error).message); } finally { setBusy(false); }
   }
   async function setSchoolDay() {
@@ -90,13 +92,24 @@ export function Attendance({ schoolId, csrfToken, role, accessRefresh }: Props) 
     catch (e) { setError((e as Error).message); } finally { setBusy(false); }
   }
   const marks = register?.items.map(row => ({ learnerId: row.id, mark: row.mark })) ?? [];
-  const action = register?.status === 'draft' ? 'submit' : register?.status === 'submitted' ? (head ? 'lock' : 'correct') : 'correct';
+  const action = register?.status === 'draft' ? 'submit' : 'correct';
   return <section aria-labelledby="attendance-title">
     <p className="eyebrow">Daily records</p><h2 id="attendance-title">Attendance</h2>
     <p className="muted">Record one dated register per class. Changes after submission require a reviewed reason.</p>
     {error && <p role="alert">{error}</p>}{notice && <p role="status" aria-live="polite">{notice}</p>}
     <div className="actions"><label>Date<input type="date" value={day} onChange={e => { setDay(e.target.value); setClassId(''); setSchoolDayVersion(undefined); setDayLoading(true); }} /></label><label>Find a class<input value={classSearchInput} onChange={e => setClassSearchInput(e.target.value)} /></label><button className="secondary" type="button" disabled={busy} onClick={() => { setClassSearch(classSearchInput.trim()); setClassId(''); }}>Find class</button><label>Class<select value={classId} onChange={e => setClassId(e.target.value)}><option value="">Choose a class</option>{classes.map(row => <option key={row.id} value={row.id}>{row.name}</option>)}</select></label></div>
     {head && <div className="actions"><label><input type="checkbox" checked={open} onChange={e => setOpen(e.target.checked)} /> School day open</label><input aria-label="School day reason" placeholder="Reason" value={reason} onChange={e => setReason(e.target.value)} maxLength={500} /><button className="secondary" type="button" disabled={busy || dayLoading} onClick={() => void setSchoolDay()}>Save school day</button></div>}
-    {register && <><h3>{register.className} · {register.date}</h3><p className="muted">Status: {register.status}. Every enrolled learner appears once.</p><ul className="history">{register.items.map(row => <li key={row.id}><strong>{row.full_name}</strong><span>{row.admission_number}</span><select aria-label={`Attendance for ${row.full_name}`} value={row.mark} disabled={busy || register.status === 'locked' && !head} onChange={e => setRegister({ ...register, items: register.items.map(item => item.id === row.id ? { ...item, mark: e.target.value as Mark } : item) })}><option value="unmarked">Unmarked</option><option value="present">Present</option><option value="late">Late</option><option value="absent">Absent</option><option value="excused">Excused</option></select></li>)}</ul><div className="actions"><button type="button" disabled={busy || !register.items.length} onClick={() => void post(`/schools/${schoolId}/attendance/classes/${classId}/register`, { day, version: register.version, action: 'save', marks }, `register:${classId}:${day}:save`)}>Save draft</button>{action === 'correct' && <input aria-label="Correction reason" placeholder="Correction reason" minLength={3} value={reason} onChange={e => setReason(e.target.value)} />}{(register.status !== 'locked' || head) && <button className="secondary" type="button" disabled={busy || !register.items.length || (action === 'correct' && reason.trim().length < 3)} onClick={() => void post(`/schools/${schoolId}/attendance/classes/${classId}/register`, { day, version: register.version, action, marks, ...(action === 'correct' ? { correctionReason: reason.trim() } : {}) }, `register:${classId}:${day}:${action}:${register.version}`)}>{action === 'submit' ? 'Submit register' : action === 'lock' ? 'Lock register' : 'Save correction'}</button>}</div></>}
+    {register && <><h3>{register.className} · {register.date}</h3><p className="muted">Status: {register.status}. {register.status==='draft'?'Every currently enrolled learner appears once.':'The roster captured for this register is retained.'}</p>
+      {register.rosterSource==='legacy_marks'&&<p role="status">This older roster was recovered from saved marks. Review it against school records; original submission-time names and membership may be incomplete.</p>}
+      {!register.items.length&&<p>No learners in this register.</p>}
+      <ul className="history">{register.items.map(row => <li key={row.id}><strong>{row.full_name}</strong><span>{row.admission_number}</span><select aria-label={`Attendance for ${row.full_name}`} value={row.mark} disabled={busy || register.status === 'locked' && !head} onChange={e => setRegister({ ...register, items: register.items.map(item => item.id === row.id ? { ...item, mark: e.target.value as Mark } : item) })}><option value="unmarked">Unmarked</option><option value="present">Present</option><option value="late">Late</option><option value="absent">Absent</option><option value="excused">Excused</option></select></li>)}</ul>
+      <div className="actions">
+        {register.status==='draft'&&<button type="button" disabled={busy} onClick={() => void post(`/schools/${schoolId}/attendance/classes/${classId}/register`, { day, version: register.version, action: 'save', marks }, `register:${classId}:${day}:save`)}>Save draft</button>}
+        {(register.status !== 'locked' || head)&&<>
+          {action === 'correct' && <input aria-label="Correction reason" placeholder="Correction reason" minLength={3} value={correctionReason} onChange={e => setCorrectionReason(e.target.value)} />}
+          <button className="secondary" type="button" disabled={busy || (action === 'correct' && correctionReason.trim().length < 3)} onClick={() => void post(`/schools/${schoolId}/attendance/classes/${classId}/register`, { day, version: register.version, action, marks, ...(action === 'correct' ? { correctionReason: correctionReason.trim() } : {}) }, `register:${classId}:${day}:${action}:${register.version}`)}>{action === 'submit' ? 'Submit register' : 'Save correction'}</button>
+          {head&&register.status==='submitted'&&<button className="secondary" type="button" disabled={busy} onClick={()=>void post(`/schools/${schoolId}/attendance/classes/${classId}/register`,{day,version:register.version,action:'lock',marks},`register:${classId}:${day}:lock:${register.version}`)}>Lock register</button>}
+        </>}
+      </div></>}
   </section>;
 }

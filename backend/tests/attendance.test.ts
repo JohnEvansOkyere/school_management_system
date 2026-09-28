@@ -51,3 +51,12 @@ test('marks are complete, unmarked is explicit, stale edits conflict and correct
   const read=await (await call(`/attendance/classes/${section}/register?day=${today}`,'GET',undefined,head)).json();assert.equal(read.items[0].mark,'excused');assert.equal((await call(`/attendance/classes/${section}/register`,'POST',{operationId:randomUUID(),day:today,version:read.version,action:'save',marks:[]},head)).status,409);
   assert.equal((await owner.query('SELECT count(*) FROM attendance_registers WHERE school_id=$1 AND id=$2',[school,register.id])).rows[0].count,'1');assert.equal((await owner.query('SELECT count(*) FROM attendance_corrections WHERE school_id=$1 AND register_id=$2',[school,register.id])).rows[0].count,'2');
 });
+test('locked corrections retain captured membership after a backdated withdrawal and admission',async()=>{
+  const read=await (await call(`/attendance/classes/${section}/register?day=${today}`)).json();
+  const corrected=await post(`/attendance/classes/${section}/register`,{day:today,version:read.version,action:'correct',marks:read.items.map((row:any)=>({learnerId:row.id,mark:'present'})),correctionReason:'Reviewed historical attendance evidence'});
+  assert.equal(corrected.status,'locked');
+  const reloaded=await (await call(`/attendance/classes/${section}/register?day=${today}`)).json();assert.equal(reloaded.items.length,1);assert.equal(reloaded.items[0].id,read.items[0].id);assert.equal(reloaded.items[0].mark,'present');
+  const later=(await owner.query("SELECT id FROM learners WHERE school_id=$1 AND full_name='Later historical enrolment'",[school])).rows[0].id;
+  await post(`/attendance/classes/${section}/register`,{day:today,version:reloaded.version,action:'correct',marks:[{learnerId:later,mark:'absent'}],correctionReason:'Cannot replace captured roster'},400);
+  assert.equal((await owner.query('SELECT count(*) FROM attendance_marks WHERE school_id=$1 AND register_id=$2 AND learner_id=$3',[school,reloaded.id,later])).rows[0].count,'0');
+});
