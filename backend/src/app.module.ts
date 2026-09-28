@@ -6,5 +6,7 @@ import { TenancyController } from './modules/tenancy/tenancy.controller';
 import { ExportsController } from './modules/tenancy/exports.controller';
 import { LearnersController } from './modules/learners/learners.controller';
 import { LearnersService } from './modules/learners/learners.service';
-@Module({controllers:[IdentityController,TenancyController,ExportsController,LearnersController],providers:[Database,Access,LearnersService]})
+import { GuardiansController } from './modules/learners/guardians.controller';
+import { GuardiansService } from './modules/learners/guardians.service';
+@Module({controllers:[IdentityController,TenancyController,ExportsController,LearnersController,GuardiansController],providers:[Database,Access,LearnersService,GuardiansService]})
 export class AppModule {}

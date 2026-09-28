@@ -65,13 +65,15 @@ The server establishes tenant context from verified membership; the caller's sch
 
 Keep enrolment history, immutable published reports and financial corrections. Use UUIDs; human numbers are school-scoped unique values. Store UTC event timestamps and date-only birth/attendance dates, displayed in Africa/Accra. Money uses integer pesewas; grade calculations use exact decimals with explicit rounding.
 
+Effective enrolment queries exclude `superseded_at IS NOT NULL`; historical views retain those original intervals and their supersession reasons. Withdrawal before a scheduled transfer supersedes affected plans atomically and records the shortened effective interval without rewriting closed dates. Attendance, class scopes and capacity must use effective intervals; published snapshots retain their original inputs.
+
 Imports stage rows for validation, duplicate review and approval before commit. Never match people solely by name/phone. Opening balances must reconcile to source totals. Exports recheck permissions at generation/download and prevent spreadsheet formula injection. Index tenant plus actual query keys; caches include school, audience and permission context.
 
 ## 4. Access, privacy and security
 
 Authorization combines identity, active membership, capability, object relationship and workflow state. Teachers access assigned classes/subjects; accountants get billing identity and finance; front desk gets admission/contact scope; guardians get only permitted linked-child information and published reports. Proprietors do not automatically receive restricted medical/custody/safeguarding access. Grant that separately.
 
-Guardian links distinguish academic, billing, pickup and contact rights. A sponsor/payment sender does not become a guardian. Revocation applies to sessions, queued jobs, downloads and AI. Shared/recycled phone numbers need reviewed recovery and verification. Use minimal lock-screen notices. No biometrics or direct child AI accounts in the first pilot.
+Guardian links distinguish academic, billing, pickup and contact rights. Current links begin pending, require headteacher verification with a reason, and are revoked/replaced rather than edited; staff history is paged/searchable and retains guardian identity. Child responses reevaluate current verified links and return academic fields only with academic rights. A sponsor/payment sender does not become a guardian. Revocation applies to sessions, queued jobs, downloads and AI. Shared/recycled phone numbers need reviewed recovery and verification. Use minimal lock-screen notices. No biometrics or direct child AI accounts in the first pilot.
 
 Use secure sessions, CSRF protection, OIDC validation, privileged MFA, rate limits, output escaping/CSP and private scanned files. Keep credentials in a secret manager. Log minimized audit metadata, not whole medical notes, documents or prompts. Platform support requires a time-limited authorized grant and audit, not standing school-data access.
 
