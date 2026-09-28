@@ -16,5 +16,9 @@ import { TeachingController } from './modules/staff/teaching.controller';
 import { TeachingService } from './modules/staff/teaching.service';
 import { AttendanceController } from './modules/attendance/attendance.controller';
 import { AttendanceService } from './modules/attendance/attendance.service';
-@Module({controllers:[IdentityController,TenancyController,ExportsController,LearnersController,LearnerImportsController,CollectionController,GuardiansController,TeachingController,AttendanceController],providers:[Database,Access,LearnersService,LearnerImportsService,CollectionService,GuardiansService,TeachingService,AttendanceService]})
+import { EarlyYearsController } from './modules/early-years/early-years.controller';
+import { EarlyYearsService } from './modules/early-years/early-years.service';
+import { EarlyYearsReportsController } from './modules/early-years/reports.controller';
+import { EarlyYearsReportsService } from './modules/early-years/reports.service';
+@Module({controllers:[IdentityController,TenancyController,ExportsController,LearnersController,LearnerImportsController,CollectionController,GuardiansController,TeachingController,AttendanceController,EarlyYearsController,EarlyYearsReportsController],providers:[Database,Access,LearnersService,LearnerImportsService,CollectionService,GuardiansService,TeachingService,AttendanceService,EarlyYearsService,EarlyYearsReportsService]})
 export class AppModule {}
