@@ -1,14 +1,14 @@
 import { useEffect, useRef, useState } from 'react';
 import { request } from '../lib/api';
 
-type Props = { schoolId: string; csrfToken: string; role: string };
+type Props = { schoolId: string; csrfToken: string; role: string; accessRefresh: number };
 type ClassRow = { id: string; name: string; level?: string; year_name?: string };
 type Mark = 'unmarked' | 'present' | 'late' | 'absent' | 'excused';
 type Learner = { id: string; full_name: string; admission_number: string; mark: Mark };
 type Register = { id: string | null; status: 'draft' | 'submitted' | 'locked'; version: number; className: string; date: string; items: Learner[] };
 const today = () => new Date().toLocaleDateString('sv-SE', { timeZone: 'Africa/Accra' });
 
-export function Attendance({ schoolId, csrfToken, role }: Props) {
+export function Attendance({ schoolId, csrfToken, role, accessRefresh }: Props) {
   const head = role === 'headteacher';
   const [day, setDay] = useState(today());
   const [classes, setClasses] = useState<ClassRow[]>([]);
@@ -24,14 +24,33 @@ export function Attendance({ schoolId, csrfToken, role }: Props) {
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
   const operations = useRef(new Map<string, string>());
+  const classRequestEpoch = useRef(0);
+  const lastAccessRefresh = useRef(accessRefresh);
 
   useEffect(() => {
+    const epoch = ++classRequestEpoch.current;
+    const accessWasRefreshed = accessRefresh !== lastAccessRefresh.current;
+    lastAccessRefresh.current = accessRefresh;
+    if (!head && accessWasRefreshed) {
+      setClasses([]); setClassId(''); setRegister(null);
+    }
     const query = new URLSearchParams({ offset: '0', limit: '50' });
     if (!head) query.set('date', day);
     if (classSearch.trim()) query.set('search', classSearch.trim());
     request<{ items: ClassRow[] }>(`/schools/${schoolId}/teaching/${head ? 'class-options' : 'classes'}?${query.toString()}`)
-      .then(page => setClasses(page.items)).catch(e => { setClasses([]); setError((e as Error).message); });
-  }, [classSearch, day, head, schoolId]);
+      .then(page => {
+        if (classRequestEpoch.current !== epoch) return;
+        setClasses(page.items);
+        if (!head && classId && !page.items.some(row => row.id === classId)) {
+          setClassId(''); setRegister(null);
+        }
+      }).catch(e => {
+        if (classRequestEpoch.current !== epoch) return;
+        setClasses([]); setError((e as Error).message);
+        if (!head) { setClassId(''); setRegister(null); }
+      });
+    return () => { classRequestEpoch.current++; };
+  }, [accessRefresh, classSearch, day, head, schoolId]);
 
   useEffect(() => {
     setDayLoading(true);

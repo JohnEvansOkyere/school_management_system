@@ -27,8 +27,12 @@ after(async()=>{await app?.close();await runtime.end();await owner.end();});
 test('runtime is non-owner, not privileged, and RLS is forced',async()=>{
   const role=(await runtime.query("SELECT rolsuper,rolbypassrls,rolcreaterole,rolcreatedb FROM pg_roles WHERE rolname=current_user")).rows[0];
   assert.deepEqual(role,{rolsuper:false,rolbypassrls:false,rolcreaterole:false,rolcreatedb:false});
-  const tables=(await runtime.query("SELECT relname,relforcerowsecurity,pg_get_userbyid(relowner) AS owner FROM pg_class WHERE relname IN ('schools','memberships','audit_events','outbox_jobs')")).rows;
-  assert.equal(tables.length,4);for(const table of tables){assert.equal(table.relforcerowsecurity,true);assert.notEqual(table.owner,'school_app');}
+  const tables=(await runtime.query("SELECT relname,relrowsecurity,relforcerowsecurity,pg_get_userbyid(relowner) AS owner FROM pg_class WHERE relname IN ('users','sessions','schools','memberships','audit_events','outbox_jobs')")).rows;
+  assert.equal(tables.length,6);for(const table of tables){assert.equal(table.relrowsecurity,true);assert.equal(table.relforcerowsecurity,true);assert.notEqual(table.owner,'school_app');}
+  const policies=(await runtime.query("SELECT tablename,cmd,roles::text[] AS roles FROM pg_policies WHERE schemaname='public' AND tablename IN ('users','sessions') ORDER BY tablename,cmd")).rows;
+  assert.deepEqual(policies.map((row:any)=>[row.tablename,row.cmd,row.roles]),[
+    ['sessions','INSERT',['school_app']],['sessions','SELECT',['school_app']],['sessions','UPDATE',['school_app']],['users','SELECT',['school_app']],
+  ]);
 });
 test('missing context fails closed; pooled transaction context resets after commit and rollback',async()=>{
   assert.equal((await runtime.query('SELECT * FROM schools')).rowCount,0);

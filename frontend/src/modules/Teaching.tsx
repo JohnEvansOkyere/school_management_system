@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { request } from '../lib/api';
 
 type Role = 'headteacher' | 'teacher' | string;
-type Props = { schoolId: string; csrfToken: string; role: Role };
+type Props = { schoolId: string; csrfToken: string; role: Role; onAccessRefresh?: () => void };
 type Page<T> = { items: T[]; total: number; offset: number; limit: number };
 type TeacherCandidate = { id: string; display_name: string };
 type ClassOption = { id: string; name: string; level: string; year_name: string; start_date: string; end_date: string };
@@ -13,7 +13,7 @@ type SelectedClass = Pick<TeacherClass, 'id' | 'name' | 'level' | 'year_name'>;
 
 const todayInGhana = () => new Date().toLocaleDateString('sv-SE', { timeZone: 'Africa/Accra' });
 
-export function Teaching({ schoolId, csrfToken, role }: Props) {
+export function Teaching({ schoolId, csrfToken, role, onAccessRefresh }: Props) {
   const isHeadteacher = role === 'headteacher';
   const [candidates, setCandidates] = useState<TeacherCandidate[]>([]);
   const [classOptions, setClassOptions] = useState<ClassOption[]>([]);
@@ -158,6 +158,7 @@ export function Teaching({ schoolId, csrfToken, role }: Props) {
       if (headEpoch.current === head) setHeadLoading(false);
       if (assignmentEpoch.current === assignment) setAssignmentLoading(false);
     } else {
+      onAccessRefresh?.();
       setSelectedClass(''); selectedClassRef.current = ''; setSelectedClassOption(null); setRoster([]); setRosterTotal(0); setRosterClassName(''); setRosterDate(''); setRosterOffset(0); setRosterSearch(''); setRosterSearchInput('');
       setTeacherRefresh(value => value + 1);
     }
