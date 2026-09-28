@@ -10,5 +10,7 @@ import { GuardiansController } from './modules/learners/guardians.controller';
 import { GuardiansService } from './modules/learners/guardians.service';
 import { TeachingController } from './modules/staff/teaching.controller';
 import { TeachingService } from './modules/staff/teaching.service';
-@Module({controllers:[IdentityController,TenancyController,ExportsController,LearnersController,GuardiansController,TeachingController],providers:[Database,Access,LearnersService,GuardiansService,TeachingService]})
+import { AttendanceController } from './modules/attendance/attendance.controller';
+import { AttendanceService } from './modules/attendance/attendance.service';
+@Module({controllers:[IdentityController,TenancyController,ExportsController,LearnersController,GuardiansController,TeachingController,AttendanceController],providers:[Database,Access,LearnersService,GuardiansService,TeachingService,AttendanceService]})
 export class AppModule {}
