@@ -9,7 +9,7 @@ export function sessionToken(req: Request) {
   const match = (req.headers.cookie ?? '').match(/(?:^|;\s*)school_session=([a-f0-9]{64})(?:;|$)/);
   return match?.[1] ?? '';
 }
-export interface Actor { userId: string; membershipId: string; role: string; schoolId: string }
+export interface Actor { userId: string; membershipId: string; role: string; schoolId: string; displayName?: string }
 @Injectable()
 export class Access {
   constructor(private readonly db: Database) {}
@@ -29,7 +29,7 @@ export class Access {
       if (!membership.rowCount) throw new NotFoundException('School unavailable');
       if (roles && !roles.includes(membership.rows[0].role)) throw new ForbiddenException('Your role cannot perform this action');
       await client.query("SELECT set_config('app.school_id',$1,true)",[schoolId]);
-      return work(client,{userId:session.user_id,membershipId:membership.rows[0].id,role:membership.rows[0].role,schoolId});
+      return work(client,{userId:session.user_id,membershipId:membership.rows[0].id,role:membership.rows[0].role,schoolId,displayName:session.display_name});
     });
   }
 }

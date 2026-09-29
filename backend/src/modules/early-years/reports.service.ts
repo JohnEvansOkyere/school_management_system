@@ -6,15 +6,15 @@ import { audit,command } from '../../core/commands';
 import { EarlyYearsReportCreateDto,EarlyYearsReportEditDto,EarlyYearsReportListDto,EarlyYearsReportRevisionDto,EarlyYearsReportTransitionDto } from './reports.dto';
 
 const templateVersion='early-years-narrative-v1';
-const digest=(value:unknown)=>createHash('sha256').update(JSON.stringify(value)).digest('hex');
+const canonical=(value:any):any=>Array.isArray(value)?value.map(canonical):value&&typeof value==='object'?Object.fromEntries(Object.keys(value).sort().map(key=>[key,canonical(value[key])])):value;
+const digest=(value:unknown)=>createHash('sha256').update(JSON.stringify(canonical(value))).digest('hex');
 const normalized=(value:string)=>value.trim();
 
 @Injectable()
 export class EarlyYearsReportsService {
-  private async actorName(client:PoolClient,actor:Actor){
-    const row=(await client.query('SELECT u.display_name FROM memberships m JOIN users u ON u.id=m.user_id WHERE m.school_id=$1 AND m.id=$2 AND m.revoked_at IS NULL FOR SHARE OF m',[actor.schoolId,actor.membershipId])).rows[0];
-    if(!row)throw new NotFoundException('Staff membership unavailable');
-    return row.display_name as string;
+  private actorName(actor:Actor){
+    if(!actor.displayName)throw new NotFoundException('Staff identity unavailable');
+    return actor.displayName;
   }
 
   private async snapshot(client:PoolClient,actor:Actor,learnerId:string,enrolmentId:string,periodStart:string,periodEnd:string,preservedSnapshot?:any){
@@ -42,7 +42,7 @@ export class EarlyYearsReportsService {
     const observations=(await client.query(`SELECT o.id,o.observed_on::text,o.level,o.educator_membership_id,o.educator_display_name,o.recorded_by_membership_id,o.policy_id,o.policy_version,o.policy_snapshot,o.entries,o.version,o.created_at
       FROM early_years_observations o WHERE o.school_id=$1 AND o.learner_id=$2 AND o.class_id=$3 AND o.enrolment_id=$4 AND o.observed_on BETWEEN $5 AND $6
       AND NOT EXISTS(SELECT 1 FROM early_years_observations newer WHERE newer.school_id=o.school_id AND newer.supersedes_id=o.id)
-      ORDER BY o.observed_on,o.created_at,o.id FOR SHARE OF o`,[actor.schoolId,learnerId,enrolment.class_id,enrolmentId,periodStart,periodEnd])).rows;
+      ORDER BY o.observed_on,o.created_at,o.id`,[actor.schoolId,learnerId,enrolment.class_id,enrolmentId,periodStart,periodEnd])).rows;
     const pending=(await client.query("SELECT id,status,day::text FROM attendance_registers WHERE school_id=$1 AND class_id=$2 AND day BETWEEN $3 AND $4 AND status<>'locked' ORDER BY day,id FOR SHARE",[actor.schoolId,enrolment.class_id,periodStart,periodEnd])).rows;
     if(pending.length)throw new ConflictException('Finalize attendance registers in this period before submitting a report');
     const attendance=(await client.query(`SELECT r.id,r.day::text,r.version,r.status,r.roster_source,s.learner_id IS NOT NULL AS included,s.full_name AS learner_name,s.admission_number,
@@ -64,15 +64,22 @@ export class EarlyYearsReportsService {
   }
 
   private async event(client:PoolClient,actor:Actor,reportId:string,revisionId:string,action:string,inputDigest:string,reason?:string){
-    const displayName=await this.actorName(client,actor);
+    const displayName=this.actorName(actor);
     await client.query('INSERT INTO early_years_report_events(id,school_id,report_id,revision_id,actor_membership_id,actor_display_name,action,reason,input_digest) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9)',[randomUUID(),actor.schoolId,reportId,revisionId,actor.membershipId,displayName,action,reason??null,inputDigest]);
     return displayName;
+  }
+
+  private async invalidateApproval(client:PoolClient,actor:Actor,revision:any,id:string,reason:string){
+    const updated=(await client.query("UPDATE early_years_report_revisions SET status='returned',returned_by=$1,returned_at=now(),return_reason=$2,version=version+1 WHERE school_id=$3 AND id=$4 RETURNING version,status",[actor.membershipId,reason,actor.schoolId,id])).rows[0];
+    await this.event(client,actor,revision.report_id,id,'returned',revision.input_digest,reason);
+    await audit(client,actor,'early-years.report.returned',id,{reportId:revision.report_id,version:updated.version,reason,invalidatedApproval:true});
+    return {id,reportId:revision.report_id,...updated,invalidatedApproval:true};
   }
 
   create(client:PoolClient,actor:Actor,body:EarlyYearsReportCreateDto){return command(client,actor,body.operationId,'early-years.report.create',body,async()=>{
     const snapshot=await this.snapshot(client,actor,body.learnerId,body.enrolmentId,body.periodStart,body.periodEnd);
     const reportId=randomUUID(),revisionId=randomUUID(),strengths=normalized(body.strengths),nextSteps=normalized(body.nextSteps),teacherNote=body.teacherNote?normalized(body.teacherNote):null;
-    const author=await this.actorName(client,actor),inputDigest=this.inputDigest(snapshot,{strengths,nextSteps,teacherNote});
+    const author=this.actorName(actor),inputDigest=this.inputDigest(snapshot,{strengths,nextSteps,teacherNote});
     await client.query('INSERT INTO early_years_reports(id,school_id,learner_id,enrolment_id,class_id,level,period_start,period_end) VALUES($1,$2,$3,$4,$5,$6,$7,$8)',[reportId,actor.schoolId,body.learnerId,body.enrolmentId,snapshot.placement.classId,snapshot.placement.level,body.periodStart,body.periodEnd]);
     await client.query('INSERT INTO early_years_report_revisions(id,school_id,report_id,revision,author_membership_id,author_display_name,strengths,next_steps,teacher_note,snapshot,input_digest,template_version) VALUES($1,$2,$3,1,$4,$5,$6,$7,$8,$9,$10,$11)',[revisionId,actor.schoolId,reportId,actor.membershipId,author,strengths,nextSteps,teacherNote,JSON.stringify(snapshot),inputDigest,templateVersion]);
     await client.query('UPDATE early_years_reports SET current_revision_id=$1 WHERE school_id=$2 AND id=$3',[revisionId,actor.schoolId,reportId]);
@@ -99,7 +106,7 @@ export class EarlyYearsReportsService {
     if(!['returned','published'].includes(prior.status))throw new ConflictException('Only a returned or published report can start a new revision');
     if(actor.role==='teacher'&&prior.author_membership_id!==actor.membershipId)throw new NotFoundException('Report unavailable');
     const snapshot=await this.snapshot(client,actor,report.learner_id,report.enrolment_id,report.period_start.toISOString().slice(0,10),report.period_end.toISOString().slice(0,10),prior.snapshot);
-    const id=randomUUID(),revision=prior.revision+1,strengths=normalized(body.strengths),nextSteps=normalized(body.nextSteps),teacherNote=body.teacherNote?normalized(body.teacherNote):null,correctionReason=normalized(body.correctionReason),displayName=await this.actorName(client,actor),inputDigest=this.inputDigest(snapshot,{strengths,nextSteps,teacherNote});
+    const id=randomUUID(),revision=prior.revision+1,strengths=normalized(body.strengths),nextSteps=normalized(body.nextSteps),teacherNote=body.teacherNote?normalized(body.teacherNote):null,correctionReason=normalized(body.correctionReason),displayName=this.actorName(actor),inputDigest=this.inputDigest(snapshot,{strengths,nextSteps,teacherNote});
     await client.query('INSERT INTO early_years_report_revisions(id,school_id,report_id,revision,supersedes_id,correction_reason,author_membership_id,author_display_name,strengths,next_steps,teacher_note,snapshot,input_digest,template_version) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)',[id,actor.schoolId,reportId,revision,prior.id,correctionReason,actor.membershipId,displayName,strengths,nextSteps,teacherNote,JSON.stringify(snapshot),inputDigest,templateVersion]);
     await client.query('UPDATE early_years_reports SET current_revision_id=$1 WHERE school_id=$2 AND id=$3',[id,actor.schoolId,reportId]);
     await this.event(client,actor,reportId,id,'corrected',inputDigest,correctionReason);await audit(client,actor,'early-years.report.revised',id,{reportId,supersedesId:prior.id,revision,reason:correctionReason});return {id,reportId,revision,version:1,status:'draft',supersedesId:prior.id};
@@ -112,28 +119,29 @@ export class EarlyYearsReportsService {
       if(revision.version!==body.version)throw new ConflictException('Report changed. Reload before reviewing');
       if(action==='return'||action==='approve'||action==='publish'){if(actor.role!=='headteacher')throw new ForbiddenException('Only headteachers can review and publish reports');}
       else if(actor.role==='teacher'&&revision.author_membership_id!==actor.membershipId)throw new NotFoundException('Report unavailable');
-      const expected=action==='submit'?'draft':action==='return'||action==='approve'?'submitted':'approved';
+      const expected=action==='submit'?'draft':action==='return'?(revision.status==='approved'?'approved':'submitted'):action==='approve'?'submitted':'approved';
       if(revision.status!==expected)throw new ConflictException(`Only ${expected} reports can be ${({submit:'submitted',return:'returned',approve:'approved',publish:'published'} as const)[action]}`);
-      const snapshot=await this.snapshot(client,actor,revision.learner_id,revision.enrolment_id,revision.period_start,revision.period_end,revision.snapshot);
+      if(action==='return'){
+        if(!body.reason)throw new BadRequestException('A return reason is required');
+        const returned=(await client.query("UPDATE early_years_report_revisions SET status='returned',returned_by=$1,returned_at=now(),return_reason=$2,version=version+1 WHERE school_id=$3 AND id=$4 RETURNING version,status",[actor.membershipId,body.reason.trim(),actor.schoolId,id])).rows[0];
+        await this.event(client,actor,revision.report_id,id,'returned',revision.input_digest,body.reason.trim());
+        await audit(client,actor,'early-years.report.returned',id,{reportId:revision.report_id,version:returned.version,reason:body.reason.trim()});
+        return {id,reportId:revision.report_id,...returned};
+      }
+      let snapshot:any;
+      try { snapshot=await this.snapshot(client,actor,revision.learner_id,revision.enrolment_id,revision.period_start,revision.period_end,revision.snapshot); }
+      catch(error){if(action==='publish'&&error instanceof ConflictException)return this.invalidateApproval(client,actor,revision,id,'Attendance evidence changed after approval; review a new report revision.');throw error;}
       const inputDigest=this.inputDigest(snapshot,{strengths:revision.strengths,nextSteps:revision.next_steps,teacherNote:revision.teacher_note});
-      if(action==='approve'&&inputDigest!==revision.input_digest)throw new ConflictException('Report evidence or narrative changed. Return it for revision before approval');
+      if(['submit','approve'].includes(action)&&inputDigest!==revision.input_digest)throw new ConflictException('Report evidence or narrative changed. Refresh the draft before continuing');
       if(action==='publish'&&inputDigest!==revision.input_digest){
-        const reason='Evidence changed after approval; review a new report revision.';
-        const updated=(await client.query("UPDATE early_years_report_revisions SET status='returned',returned_by=$1,returned_at=now(),return_reason=$2,version=version+1 WHERE school_id=$3 AND id=$4 RETURNING version,status",[actor.membershipId,reason,actor.schoolId,id])).rows[0];
-        await this.event(client,actor,revision.report_id,id,'returned',inputDigest,reason);
-        await audit(client,actor,'early-years.report.returned',id,{reportId:revision.report_id,version:updated.version,reason,invalidatedApproval:true});
-        return {id,reportId:revision.report_id,...updated,invalidatedApproval:true};
+        return this.invalidateApproval(client,actor,revision,id,'Evidence changed after approval; review a new report revision.');
       }
       let updated:any;
       if(action==='submit')updated=(await client.query("UPDATE early_years_report_revisions SET status='submitted',submitted_by=$1,submitted_at=now(),version=version+1 WHERE school_id=$2 AND id=$3 RETURNING version,status",[actor.membershipId,actor.schoolId,id])).rows[0];
-      if(action==='return'){
-        if(!body.reason)throw new BadRequestException('A return reason is required');
-        updated=(await client.query("UPDATE early_years_report_revisions SET status='returned',returned_by=$1,returned_at=now(),return_reason=$2,version=version+1 WHERE school_id=$3 AND id=$4 RETURNING version,status",[actor.membershipId,body.reason.trim(),actor.schoolId,id])).rows[0];
-      }
       if(action==='approve')updated=(await client.query("UPDATE early_years_report_revisions SET status='approved',approved_by=$1,approved_at=now(),version=version+1 WHERE school_id=$2 AND id=$3 RETURNING version,status",[actor.membershipId,actor.schoolId,id])).rows[0];
       if(action==='publish')updated=(await client.query("UPDATE early_years_report_revisions SET status='published',published_by=$1,published_at=now(),version=version+1 WHERE school_id=$2 AND id=$3 RETURNING version,status",[actor.membershipId,actor.schoolId,id])).rows[0];
-      const reason=action==='return'?body.reason!.trim():undefined;await this.event(client,actor,revision.report_id,id,action==='submit'?'submitted':action==='return'?'returned':action==='approve'?'approved':'published',inputDigest,reason);
-      await audit(client,actor,`early-years.report.${action==='submit'?'submitted':action==='return'?'returned':action==='approve'?'approved':'published'}`,id,{reportId:revision.report_id,version:updated.version,...(reason?{reason}:{})});return {id,reportId:revision.report_id,...updated};
+      await this.event(client,actor,revision.report_id,id,action==='submit'?'submitted':action==='approve'?'approved':'published',inputDigest);
+      await audit(client,actor,`early-years.report.${action==='submit'?'submitted':action==='approve'?'approved':'published'}`,id,{reportId:revision.report_id,version:updated.version});return {id,reportId:revision.report_id,...updated};
     });
   }
   submit(client:PoolClient,actor:Actor,id:string,body:EarlyYearsReportTransitionDto){return this.transition(client,actor,id,body,'submit');}
@@ -154,7 +162,7 @@ export class EarlyYearsReportsService {
     }else if(actor.role!=='headteacher')throw new ForbiddenException('Only teachers and headteachers can access staff reports');
     const from='FROM early_years_reports r JOIN early_years_report_revisions v ON v.school_id=r.school_id AND v.id=r.current_revision_id';
     const total=Number((await client.query(`SELECT count(*) ${from} WHERE ${where}`,params)).rows[0].count);
-    const items=(await client.query(`SELECT r.id AS report_id,r.learner_id,r.class_id,r.enrolment_id,r.level,r.period_start::text,r.period_end::text,v.* ${from} WHERE ${where} ORDER BY r.period_start DESC,r.learner_id,r.id LIMIT $${params.length+1} OFFSET $${params.length+2}`,[...params,page.limit,page.offset])).rows;
+    const items=(await client.query(`SELECT r.id AS report_id,r.learner_id,r.class_id,r.enrolment_id,r.level,r.period_start::text,r.period_end::text,v.*,v.author_membership_id=$${params.length+1} AS can_edit ${from} WHERE ${where} ORDER BY r.period_start DESC,r.learner_id,r.id LIMIT $${params.length+2} OFFSET $${params.length+3}`,[...params,actor.membershipId,page.limit,page.offset])).rows;
     return {items,total,offset:page.offset,limit:page.limit};
   }
 
@@ -164,6 +172,15 @@ export class EarlyYearsReportsService {
     const revisions=(await client.query(`SELECT r.id AS report_id,r.level,r.period_start::text,r.period_end::text,v.id AS revision_id,v.revision,v.status,v.strengths,v.next_steps,v.teacher_note,v.snapshot,v.template_version,v.approved_at,v.published_at,v.author_display_name
       FROM early_years_reports r JOIN early_years_report_revisions v ON v.school_id=r.school_id AND v.report_id=r.id
       WHERE r.school_id=$1 AND r.learner_id=$2 AND v.status='published' ORDER BY r.period_start DESC,v.revision DESC,v.published_at DESC`,[actor.schoolId,learnerId])).rows;
-    return {items:revisions};
+    const items=revisions.map(({snapshot,...row}:any)=>({
+      ...row,
+      snapshot:{
+        learner:{fullName:snapshot.learner.fullName},
+        placement:{className:snapshot.placement.className,level:snapshot.placement.level,academicYear:snapshot.placement.academicYear},
+        observations:snapshot.observations.map((item:any)=>({observedOn:item.observed_on,educator:item.educator_display_name,entries:item.entries.map((entry:any)=>({title:entry.title,learningArea:entry.learningArea,strand:entry.strand,subStrand:entry.subStrand,status:entry.status,descriptor:entry.descriptor?.text??null,evidence:entry.evidence}))})),
+        attendance:{counts:snapshot.attendance.counts,coverageNote:snapshot.attendance.coverageNote,registers:snapshot.attendance.registers.map((item:any)=>({day:item.day,mark:item.mark,learnerIncluded:item.learnerIncluded}))}
+      }
+    }));
+    return {items};
   }
 }

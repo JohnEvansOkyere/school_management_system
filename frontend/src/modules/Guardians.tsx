@@ -135,7 +135,10 @@ export function Guardians({ schoolId, csrfToken, role }: Props) {
   async function refresh() {
     if (!isHeadteacher) { setSelectedChild(''); selectedChildRef.current = ''; setChildDetail(null); setDetailLoading(false); detailEpoch.current++; }
     if (isHeadteacher) await Promise.all([loadBase(true), loadLinks(true)]);
-    else await loadBase(true);
+    else {
+      await loadBase(true);
+      window.dispatchEvent(new Event('guardian-records-refreshed'));
+    }
   }
 
   async function mutate(key: string, payload: Record<string, unknown>, path: string, successMessage: string) {
