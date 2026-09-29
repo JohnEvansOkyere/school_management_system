@@ -13,11 +13,12 @@ export interface Actor { userId: string; membershipId: string; role: string; sch
 @Injectable()
 export class Access {
   constructor(private readonly db: Database) {}
-  async identity(client: PoolClient, req: Request, write = false) {
-    const result = await client.query('SELECT s.user_id,s.csrf_token,u.display_name FROM sessions s JOIN users u ON u.id=s.user_id WHERE s.token_hash=$1 AND s.revoked_at IS NULL AND s.expires_at > now() FOR SHARE OF s', [digest(sessionToken(req))]);
+  async identity(client: PoolClient, req: Request, write = false, allowPasswordChange = false) {
+    const result = await client.query('SELECT s.user_id,s.csrf_token,u.display_name,u.must_change_password FROM sessions s JOIN users u ON u.id=s.user_id WHERE s.token_hash=$1 AND s.revoked_at IS NULL AND s.expires_at > now() FOR SHARE OF s', [digest(sessionToken(req))]);
     if (!result.rowCount) throw new UnauthorizedException('Sign in to continue');
     const session = result.rows[0];
     if (write && req.headers['x-csrf-token'] !== session.csrf_token) throw new ForbiddenException('Invalid request verification');
+    if (session.must_change_password && !allowPasswordChange) throw new ForbiddenException({message:'Change your temporary password to continue',code:'PASSWORD_CHANGE_REQUIRED'});
     await client.query("SELECT set_config('app.user_id',$1,true)",[session.user_id]);
     return session;
   }

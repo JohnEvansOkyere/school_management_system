@@ -202,3 +202,27 @@ test('connection and proxy failures show a plain-language retry message, not a p
   await expect(panel.getByRole('alert')).toContainText('Your changes were not saved');
   expect(errors.join(' ')).not.toContain('Unexpected token');
 });
+test('platform administrator creates a school; its headteacher signs in with the temporary password and must change it',async({page,browser})=>{
+  const {Pool}=require('pg');const {randomBytes,scryptSync}=require('node:crypto');const path=require('node:path');
+  const owner=new Pool({host:path.resolve(__dirname,'../.local/postgres/socket'),port:55438,database:process.env.LOCAL_DB_NAME??'school_saas_local',user:process.env.USER});
+  const suffix=randomUUID().slice(0,8),adminEmail=`platform-${suffix}@example.test`,headEmail=`head-${suffix}@example.test`,schoolName=`Real School ${suffix}`,salt=randomBytes(16).toString('hex');
+  try {
+    const adminId=randomUUID();
+    await owner.query('INSERT INTO users(id,display_name,synthetic_login,password_hash) VALUES($1,$2,$3,$4)',[adminId,'Platform Admin',adminEmail,`${salt}:${scryptSync('Platform-admin-2026!',salt,64).toString('hex')}`]);
+    await owner.query('INSERT INTO platform_admins(user_id) VALUES($1)',[adminId]);
+    await page.goto('/');await page.getByLabel('Email',{exact:true}).fill(adminEmail);await page.getByLabel('Password',{exact:true}).fill('Platform-admin-2026!');await page.getByRole('button',{name:'Sign in',exact:true}).click();
+    const panel=page.getByRole('region',{name:'Platform administration'});await expect(panel).toBeVisible();
+    await panel.getByLabel('School name',{exact:true}).fill(schoolName);await panel.getByLabel('Headteacher name',{exact:true}).fill('Efua Mensah');await panel.getByLabel('Headteacher email',{exact:true}).fill(headEmail);
+    await panel.getByRole('button',{name:'Create school',exact:true}).click();
+    const credentials=panel.getByRole('status');await expect(credentials).toContainText(headEmail);
+    const temporary=(await credentials.locator('code').textContent())!.trim();expect(temporary.length).toBeGreaterThanOrEqual(16);
+    await expect(panel.locator('li').filter({hasText:schoolName})).toContainText('1 headteacher');
+    const context=await browser.newContext(),headPage=await context.newPage();
+    try {
+      await headPage.goto('/');await headPage.getByLabel('Email',{exact:true}).fill(headEmail);await headPage.getByLabel('Password',{exact:true}).fill(temporary);await headPage.getByRole('button',{name:'Sign in',exact:true}).click();
+      await expect(headPage.getByRole('heading',{name:'Choose a new password'})).toBeVisible();
+      await headPage.getByLabel('Temporary password',{exact:true}).fill(temporary);await headPage.getByLabel('New password',{exact:true}).fill('Brand-new-passphrase-77');await headPage.getByRole('button',{name:'Save new password'}).click();
+      await expect(headPage.getByRole('heading',{name:schoolName,exact:true})).toBeVisible();await expect(headPage.getByRole('region',{name:'Platform administration'})).toHaveCount(0);
+    } finally {await context.close();}
+  } finally {await owner.end();}
+});

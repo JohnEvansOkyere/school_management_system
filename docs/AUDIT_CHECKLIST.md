@@ -35,7 +35,8 @@ Severity: **P0** breaks, or blocks any real school use · **P1** must fix before
   - Done 2026-09-29 (code and tests only; nothing deployed): `ALLOWED_HOSTS`, `ALLOWED_ORIGINS` (https), `PORT`, `HOST`, `TRUST_PROXY` in `core/config.ts`; API tests cover allowed/denied hosts and origins.
   - Fix: read `ALLOWED_HOSTS`, `ALLOWED_ORIGINS` (https), `PORT` and `HOST` from env; keep the localhost defaults for dev; set `trust proxy` to the platform's proxy count only.
   - Verify: API test with a configured host/origin passes; unknown host/origin still returns 403.
-- [ ] **No real sign-in exists.** Login only works with `DEV_AUTH=synthetic-local` from loopback (`identity.controller.ts:16`). No school can use the product until managed OIDC (or reviewed password + recovery) and MFA for headteachers/accountants ship.
+- [ ] **No real sign-in exists.**
+  - Interim 2026-09-29: platform-admin-created accounts with temporary password and forced change (`AUTH_MODE=password`). Managed provider, SMS OTP (Arkesel/Moolre) and MFA remain open. Login only works with `DEV_AUTH=synthetic-local` from loopback (`identity.controller.ts:16`). No school can use the product until managed OIDC (or reviewed password + recovery) and MFA for headteachers/accountants ship.
   - Fix: choose the identity provider (Supabase Auth is the lowest-friction option given the DB choice), map provider subject → `users`, keep server-side sessions/CSRF, add MFA for privileged roles, reviewed account recovery for shared/recycled phone numbers.
   - Verify: login, logout, revocation, MFA challenge and cross-school denial tests against the provider sandbox.
 - [x] **Hosted schema is 7 migrations behind the code.** Supabase is at 012; code requires 013–019 (identity RLS, roster snapshots, imports, collection, early years). Deploying current code against Supabase breaks attendance, imports, collection and early-years endpoints, and leaves `users`/`sessions` without the 013 policies.
