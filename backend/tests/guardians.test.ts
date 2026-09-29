@@ -4,7 +4,7 @@ import { Pool } from 'pg';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 const {createApp}=require('../dist/main');
-const config={host:path.resolve(__dirname,'../../.local/postgres/socket'),port:55438,database:'school_saas_local'};
+const config={host:path.resolve(__dirname,'../../.local/postgres/socket'),port:55438,database:process.env.LOCAL_DB_NAME??'school_saas_local'};
 const owner=new Pool({...config,user:process.env.USER}),runtime=new Pool({...config,user:'school_app'});
 const school=randomUUID(),other=randomUUID(),learner=randomUUID(),second=randomUUID(),outside=randomUUID(),year=randomUUID(),section=randomUUID();
 const users=['20000000-0000-4000-8000-000000000001','20000000-0000-4000-8000-000000000002','20000000-0000-4000-8000-000000000003','20000000-0000-4000-8000-000000000004'];

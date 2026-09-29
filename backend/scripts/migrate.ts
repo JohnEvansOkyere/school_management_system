@@ -4,6 +4,11 @@ import { readFileSync, readdirSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import path from 'node:path';
 
+// Roles are cluster-wide, so a second local database (per-run test clones' template) must not fail on CREATE ROLE.
+function tolerateSharedRoles(sql: string) {
+  return sql.replace(/^CREATE ROLE (\w+) (.*);$/gm, (_all, role, options) => `DO $role$ BEGIN IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname='${role}') THEN CREATE ROLE ${role} ${options}; END IF; END $role$;`);
+}
+
 async function main() {
   const marker = readFileSync(path.resolve(__dirname, '../../.local/postgres/disposable-marker'), 'utf8').trim();
   if (marker !== 'school-saas-disposable') throw new Error('Dedicated disposable cluster required');
@@ -17,7 +22,7 @@ async function main() {
       const prior = await client.query('SELECT checksum FROM schema_migrations WHERE name=$1', [name]);
       if (prior.rowCount) { if (prior.rows[0].checksum !== checksum) throw new Error(`Applied migration changed: ${name}`); continue; }
       await client.query('BEGIN');
-      try { await client.query(sql); await client.query('INSERT INTO schema_migrations(name,checksum) VALUES ($1,$2)', [name,checksum]); await client.query('COMMIT'); console.log(`Applied ${name}`); }
+      try { await client.query(tolerateSharedRoles(sql)); await client.query('INSERT INTO schema_migrations(name,checksum) VALUES ($1,$2)', [name,checksum]); await client.query('COMMIT'); console.log(`Applied ${name}`); }
       catch (error) { await client.query('ROLLBACK'); throw error; }
     }
   } finally { client.release(); await pool.end(); }

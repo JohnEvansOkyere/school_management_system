@@ -10,10 +10,10 @@
     "frontend"
   ],
   "scripts": {
-    "test:browser": "playwright test",
+    "test:browser": "bash scripts/with-test-db.sh npx playwright test",
     "dev:worker": "npm run worker -w backend",
     "build": "npm run build --workspaces",
-    "test": "npm run test -w backend",
+    "test": "bash scripts/with-test-db.sh npm run test -w backend",
     "db:start": "bash scripts/local-db.sh",
     "db:migrate": "npm run migrate -w backend",
     "db:migrate:supabase": "npm run migrate:supabase -w backend --",

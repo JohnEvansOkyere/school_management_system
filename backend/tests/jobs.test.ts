@@ -6,7 +6,7 @@ import { randomUUID } from 'node:crypto';
 const {createApp}=require('../dist/main');const {JobWorker}=require('../dist/jobs/worker');
 const schoolA='10000000-0000-4000-8000-000000000001',schoolB='10000000-0000-4000-8000-000000000002';
 const user='20000000-0000-4000-8000-000000000001',member='30000000-0000-4000-8000-000000000001';
-const owner=new Pool({host:path.resolve(__dirname,'../../.local/postgres/socket'),port:55438,database:'school_saas_local',user:process.env.USER});
+const owner=new Pool({host:path.resolve(__dirname,'../../.local/postgres/socket'),port:55438,database:process.env.LOCAL_DB_NAME??'school_saas_local',user:process.env.USER});
 let app:any,base:string,worker:any,cookie:string,csrf:string;
 async function call(url:string,method='GET',body?:unknown){return fetch(`${base}${url}`,{method,headers:{cookie,'content-type':'application/json','x-csrf-token':csrf},...(body?{body:JSON.stringify(body)}:{})});}
 async function queue(){const id=randomUUID();assert.equal((await call(`/schools/${schoolA}/audit-exports`,'POST',{operationId:id})).status,201);return id;}

@@ -3,7 +3,7 @@ import { Pool, PoolClient } from 'pg';
 import path from 'node:path';
 
 export function localConfig(owner = false) {
-  return { host: path.resolve(__dirname, '../../../.local/postgres/socket'), port: 55438, database: 'school_saas_local', user: owner ? process.env.USER : 'school_app', max: 5 };
+  return { host: path.resolve(__dirname, '../../../.local/postgres/socket'), port: 55438, database: process.env.LOCAL_DB_NAME ?? 'school_saas_local', user: owner ? process.env.USER : 'school_app', max: 5 };
 }
 
 export function supabaseConfig() {

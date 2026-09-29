@@ -6,7 +6,7 @@ import { randomUUID } from 'node:crypto';
 const {createApp}=require('../dist/main');
 const {AttendanceService}=require('../dist/modules/attendance/attendance.service');
 const {LearnersService}=require('../dist/modules/learners/learners.service');
-const config={host:path.resolve(__dirname,'../../.local/postgres/socket'),port:55438,database:'school_saas_local'};
+const config={host:path.resolve(__dirname,'../../.local/postgres/socket'),port:55438,database:process.env.LOCAL_DB_NAME??'school_saas_local'};
 const owner=new Pool({...config,user:process.env.USER}),runtime=new Pool({...config,user:'school_app'});
 const school=randomUUID(),other=randomUUID(),year=randomUUID(),section=randomUUID(),member=randomUUID(),learner=randomUUID(),interval=randomUUID(),foreignLearner=randomUUID();
 const user='20000000-0000-4000-8000-000000000001';

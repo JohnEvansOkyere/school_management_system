@@ -5,7 +5,7 @@ import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { parseLearnerCsv } from '../src/modules/learners/imports.csv';
 const {createApp}=require('../dist/main');
-const connection={host:path.resolve(__dirname,'../../.local/postgres/socket'),port:55438,database:'school_saas_local'};
+const connection={host:path.resolve(__dirname,'../../.local/postgres/socket'),port:55438,database:process.env.LOCAL_DB_NAME??'school_saas_local'};
 const owner=new Pool({...connection,user:process.env.USER}),runtime=new Pool({...connection,user:'school_app'});
 const school=randomUUID(),other=randomUUID();
 let app:any,base:string,head:any,desk:any,year:any,section:any;

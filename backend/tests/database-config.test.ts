@@ -9,7 +9,7 @@ function withEnv(values:Record<string,string|undefined>,work:()=>void){
 }
 
 test('worker uses its restricted local role in local/test environments',()=>withEnv({DATABASE_TARGET:'local',NODE_ENV:'test',WORKER_DATABASE_URL:undefined},()=>{
-  const config=workerDatabaseConfig();assert.equal(config.user,'school_worker');assert.equal(config.database,'school_saas_local');assert.equal(config.application_name,'school-management-worker');
+  const config=workerDatabaseConfig();assert.equal(config.user,'school_worker');assert.equal(config.database,process.env.LOCAL_DB_NAME??'school_saas_local');assert.equal(config.application_name,'school-management-worker');
 }));
 
 test('Supabase worker requires its own TLS-verified school_worker URL',()=>withEnv({DATABASE_TARGET:'supabase',NODE_ENV:'production',WORKER_DATABASE_URL:undefined},()=>{

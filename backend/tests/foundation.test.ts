@@ -9,7 +9,7 @@ const schoolB='10000000-0000-4000-8000-000000000002';
 const head='20000000-0000-4000-8000-000000000001';
 const memberA='30000000-0000-4000-8000-000000000001';
 const memberB='30000000-0000-4000-8000-000000000002';
-const config={host:path.resolve(__dirname,'../../.local/postgres/socket'),port:55438,database:'school_saas_local'};
+const config={host:path.resolve(__dirname,'../../.local/postgres/socket'),port:55438,database:process.env.LOCAL_DB_NAME??'school_saas_local'};
 const owner=new Pool({...config,user:process.env.USER});
 const runtime=new Pool({...config,user:'school_app',max:1});
 let app:any,base:string;

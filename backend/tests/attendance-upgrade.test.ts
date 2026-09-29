@@ -5,7 +5,7 @@ import path from 'node:path';
 import { readFileSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 const {AttendanceService}=require('../dist/modules/attendance/attendance.service');
-const owner=new Pool({host:path.resolve(__dirname,'../../.local/postgres/socket'),port:55438,database:'school_saas_local',user:process.env.USER});
+const owner=new Pool({host:path.resolve(__dirname,'../../.local/postgres/socket'),port:55438,database:process.env.LOCAL_DB_NAME??'school_saas_local',user:process.env.USER});
 after(()=>owner.end());
 
 test('forward upgrade restores legacy marks, labels ambiguity and preserves empty finalized registers',async()=>{
