@@ -40,6 +40,36 @@ Never put the `postgres` administrator URL on the API host. It is only used from
 5. Sign in as the platform admin, create the pilot school and its headteacher (share the temporary password privately). The headteacher creates staff and guardian accounts.
 6. Rotate the `postgres` password after step 3 and keep it out of `.env`.
 
+## 3b. Deploying on Vercel (chosen 2026-09-29)
+
+Layout (`vercel.json`): the web app is the static build of `frontend/dist`; `api/index.js` wraps the same Nest API as one Vercel Function (`/api/v1/*`, `/healthz`, `/readyz`); `api/cron.js` replaces the always-on worker. `.vercelignore` keeps `outreach/`, `.local/`, `.env*` and docs out of uploads.
+
+1. **Apply the hosted migrations first** (from your machine, with the temporary `DATABASE_MIGRATION_URL` in `.env`): `npm run db:migrate:supabase` (preview: must list 021–028 as pending), then `npm run db:migrate:supabase -- --apply`, then `npm run db:check:supabase`. Remove `DATABASE_MIGRATION_URL` from `.env` afterwards and rotate the `postgres` password.
+2. Create the project from the GitHub repo (Root Directory = repo root; the framework preset stays "Other"; `vercel.json` sets install/build/output).
+3. Environment variables (**Production only**, so previews never touch the hosted database):
+
+| Variable | Value |
+| --- | --- |
+| `DATABASE_TARGET` | `supabase` |
+| `DATABASE_URL` | `school_app` session-pooler URL with `?sslmode=verify-full&sslrootcert=bundled` (the Supabase CA ships in `backend/certs`) |
+| `WORKER_DATABASE_URL` | `school_worker` URL, same TLS options (used only by the cron function) |
+| `DB_POOL_MAX` | `2` (each function instance keeps its own pool; raise only if Supabase connection limits allow) |
+| `AUTH_MODE` | `password` |
+| `MFA_REQUIRED` | `false` (pilot decision) |
+| `MFA_ENCRYPTION_KEY` | any long random string (the app refuses to start in production without it, even with MFA off) |
+| `TRUST_PROXY` | `1` |
+| `CRON_SECRET` | random string of at least 16 characters (Vercel sends it to `/api/cron`) |
+
+`ALLOWED_HOSTS`/`ALLOWED_ORIGINS` are not needed: on Vercel the deployment's own hostnames are trusted automatically. Add both when you attach a custom domain.
+4. Deploy, then check `https://<your-domain>/readyz` returns 200 (it reports database and migration ledger).
+5. Create the platform administrator with `DATABASE_TARGET=supabase npm run platform-admin -w backend -- "Evans" you@example.com` (needs the admin URL once more), sign in, create the pilot school and headteacher.
+
+Serverless limits to know about:
+- **Cron frequency depends on your Vercel plan.** `vercel.json` schedules `/api/cron` daily (`0 6 * * *`) because Hobby allows nothing more frequent. Audit exports and, later, queued SMS only move when it runs. On Pro change the schedule to `* * * * *`.
+- The login rate limiter is per function instance, so it slows guessing but does not cap it globally. Use long unique passwords, and move it into the database before growing beyond the pilot.
+- Functions are limited to 30 s (cron 60 s) and 4.5 MB request bodies; CSV imports (40 kB) and normal requests are well within that.
+- Cold starts add about a second to the first request after idle.
+
 ## 4. Data protection gate (before any real learner record)
 
 - Register with, or confirm exemption from, the Data Protection Commission (Act 843).

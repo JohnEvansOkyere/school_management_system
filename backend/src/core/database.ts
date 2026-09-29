@@ -31,7 +31,9 @@ function supabaseRoleConfig(connectionString:string|undefined,variable:string,ex
   if (url.searchParams.get('sslmode') !== 'verify-full' || !url.searchParams.get('sslrootcert')) {
     throw new Error(`Supabase ${variable} must use sslmode=verify-full and provide sslrootcert`);
   }
-  return { connectionString, max: 5, application_name: applicationName };
+  // `sslrootcert=bundled` uses the Supabase CA shipped in backend/certs (serverless hosts have no home directory to point at).
+  if (url.searchParams.get('sslrootcert') === 'bundled') { url.searchParams.set('sslrootcert', path.resolve(__dirname, '../../certs/supabase-prod-ca-2021.crt')); connectionString = url.toString(); }
+  return { connectionString, max: Number(process.env.DB_POOL_MAX) > 0 ? Number(process.env.DB_POOL_MAX) : 5, application_name: applicationName };
 }
 
 export function appDatabaseConfig() {

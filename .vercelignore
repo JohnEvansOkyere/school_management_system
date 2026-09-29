@@ -1,0 +1,11 @@
+# Never upload contact lists, local databases, secrets or test output
+outreach
+.local
+.env
+.env.*
+e2e
+test-results
+playwright-report
+backend/tests
+docs
+*.md
