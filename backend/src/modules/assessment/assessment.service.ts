@@ -3,7 +3,7 @@ import { PoolClient } from 'pg';
 import { randomUUID } from 'node:crypto';
 import { Actor } from '../../core/access';
 import { audit, command } from '../../core/commands';
-import { PolicyDto, PublishDto, RecordScoresDto, SubjectDto, TermDto } from './assessment.dto';
+import { PolicyDto, PublishDto, RecordScoresDto, ReissueDto, ReopenDto, SubjectDto, TermDto } from './assessment.dto';
 
 type Policy = { ca_weight: number; exam_weight: number; bands: { min: number; grade: string; remark: string }[]; source_note: string; version: number };
 type Learner = { id: string; full_name: string; admission_number: string };
@@ -78,13 +78,19 @@ export class AssessmentService {
   private async latest(client: PoolClient, schoolId: string, termId: string, classId: string) {
     return (await client.query('SELECT DISTINCT ON (learner_id,subject_id,kind) learner_id,subject_id,kind,score::float AS score FROM assessment_score_entries WHERE school_id=$1 AND term_id=$2 AND class_id=$3 ORDER BY learner_id,subject_id,kind,created_at DESC,id DESC',[schoolId,termId,classId])).rows as Entry[];
   }
+  // Locked = has a published report and no newer reopening.
+  private async lockedLearners(client: PoolClient, schoolId: string, termId: string, classId: string) {
+    return new Set((await client.query(`SELECT r.learner_id FROM terminal_reports r WHERE r.school_id=$1 AND r.term_id=$2 AND r.class_id=$3 GROUP BY r.school_id,r.term_id,r.learner_id
+      HAVING NOT EXISTS (SELECT 1 FROM assessment_reopenings o WHERE o.school_id=r.school_id AND o.term_id=r.term_id AND o.learner_id=r.learner_id AND o.opened_at>max(r.published_at))`,[schoolId,termId,classId])).rows.map(row => row.learner_id as string));
+  }
   async grid(client: PoolClient, actor: Actor, classId: string, termId: string, subjectId?: string) {
     const section = await this.classFor(client,actor,classId), term = await this.term(client,actor.schoolId,termId);
     const learners = await this.learners(client,actor.schoolId,classId,term);
     const entries = (await this.latest(client,actor.schoolId,termId,classId)).filter(entry => !subjectId || entry.subject_id === subjectId);
-    const published = new Set((await client.query('SELECT learner_id FROM terminal_reports WHERE school_id=$1 AND term_id=$2 AND class_id=$3',[actor.schoolId,termId,classId])).rows.map(row => row.learner_id));
+    const published = await this.lockedLearners(client,actor.schoolId,termId,classId);
+    const everPublished = new Set((await client.query('SELECT DISTINCT learner_id FROM terminal_reports WHERE school_id=$1 AND term_id=$2 AND class_id=$3',[actor.schoolId,termId,classId])).rows.map(row => row.learner_id as string));
     return {class:section,term,policy:(await this.policy(client,actor.schoolId)) ?? null,items:learners.map(learner => ({
-      learnerId:learner.id,fullName:learner.full_name,admissionNumber:learner.admission_number,locked:published.has(learner.id),
+      learnerId:learner.id,fullName:learner.full_name,admissionNumber:learner.admission_number,locked:published.has(learner.id),published:everPublished.has(learner.id),
       ca:entries.find(e => e.learner_id === learner.id && e.kind === 'ca')?.score ?? null,exam:entries.find(e => e.learner_id === learner.id && e.kind === 'exam')?.score ?? null,
     }))};
   }
@@ -133,6 +139,37 @@ export class AssessmentService {
     ranked.forEach((row,index) => { row.position = index > 0 && row.average === ranked[index - 1].average ? ranked[index - 1].position : index + 1; });
     return {class:section,term,policy:{caWeight:policy.ca_weight,examWeight:policy.exam_weight,bands:policy.bands,sourceNote:policy.source_note},classSize:rows.length,items:rows};
   }
+  private snapshotOf(results: any, row: any) {
+    return {term:results.term,class:results.class,classSize:results.classSize,policy:results.policy,learner:{id:row.learnerId,fullName:row.fullName,admissionNumber:row.admissionNumber},subjects:row.subjects,average:row.average,position:row.position,complete:row.complete};
+  }
+  reopen(client: PoolClient, actor: Actor, classId: string, body: ReopenDto) {
+    return command(client,actor,body.operationId,'assessment.reopen',{classId,...body},async () => {
+      await this.classFor(client,actor,classId);
+      const latest = (await client.query('SELECT max(published_at) AS at FROM terminal_reports WHERE school_id=$1 AND term_id=$2 AND class_id=$3 AND learner_id=$4',[actor.schoolId,body.termId,classId,body.learnerId])).rows[0];
+      if (!latest.at) throw new ConflictException('There is no published report to correct for this learner');
+      if ((await client.query('SELECT 1 FROM assessment_reopenings WHERE school_id=$1 AND term_id=$2 AND learner_id=$3 AND opened_at>$4',[actor.schoolId,body.termId,body.learnerId,latest.at])).rowCount) throw new ConflictException('This report is already open for correction');
+      const id = randomUUID();
+      await client.query('INSERT INTO assessment_reopenings(id,school_id,term_id,learner_id,reason,opened_by) VALUES($1,$2,$3,$4,$5,$6)',[id,actor.schoolId,body.termId,body.learnerId,body.reason.trim(),actor.membershipId]);
+      await audit(client,actor,'assessment.report.reopened',body.learnerId,{termId:body.termId,reason:body.reason.trim()});
+      return {reopened:true};
+    });
+  }
+  reissue(client: PoolClient, actor: Actor, classId: string, body: ReissueDto) {
+    return command(client,actor,body.operationId,'assessment.reissue',{classId,...body},async () => {
+      const reopening = (await client.query(`SELECT o.reason FROM assessment_reopenings o WHERE o.school_id=$1 AND o.term_id=$2 AND o.learner_id=$3
+        AND o.opened_at>(SELECT max(r.published_at) FROM terminal_reports r WHERE r.school_id=o.school_id AND r.term_id=o.term_id AND r.learner_id=o.learner_id) ORDER BY o.opened_at DESC LIMIT 1`,[actor.schoolId,body.termId,body.learnerId])).rows[0];
+      if (!reopening) throw new ConflictException('Reopen this report for correction before publishing a new revision');
+      const results = await this.results(client,actor,classId,body.termId);
+      const row = results.items.find(item => item.learnerId === body.learnerId);
+      if (!row) throw new NotFoundException('Learner is not in this class for the term');
+      if (!row.complete && !body.acknowledgeIncomplete) throw new ConflictException('This learner still has missing scores. Complete them or acknowledge publishing an incomplete report');
+      const previous = (await client.query('SELECT id,revision FROM terminal_reports WHERE school_id=$1 AND term_id=$2 AND learner_id=$3 ORDER BY revision DESC LIMIT 1',[actor.schoolId,body.termId,body.learnerId])).rows[0];
+      const id = randomUUID();
+      await client.query('INSERT INTO terminal_reports(id,school_id,term_id,class_id,learner_id,snapshot,published_by,revision,supersedes_id,correction_reason) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)',[id,actor.schoolId,body.termId,classId,body.learnerId,JSON.stringify(this.snapshotOf(results,row)),actor.membershipId,previous.revision + 1,previous.id,reopening.reason]);
+      await audit(client,actor,'assessment.report.reissued',body.learnerId,{termId:body.termId,revision:previous.revision + 1});
+      return {revision:previous.revision + 1};
+    });
+  }
   publish(client: PoolClient, actor: Actor, classId: string, body: PublishDto) {
     return command(client,actor,body.operationId,'assessment.publish',{classId,...body},async () => {
       const results = await this.results(client,actor,classId,body.termId);
@@ -143,7 +180,7 @@ export class AssessmentService {
       let published = 0;
       for (const row of results.items) {
         if (already.has(row.learnerId)) continue;
-        const snapshot = {term:results.term,class:results.class,classSize:results.classSize,policy:results.policy,learner:{id:row.learnerId,fullName:row.fullName,admissionNumber:row.admissionNumber},subjects:row.subjects,average:row.average,position:row.position,complete:row.complete};
+        const snapshot = this.snapshotOf(results,row);
         await client.query('INSERT INTO terminal_reports(id,school_id,term_id,class_id,learner_id,snapshot,published_by) VALUES($1,$2,$3,$4,$5,$6,$7)',[randomUUID(),actor.schoolId,body.termId,classId,row.learnerId,JSON.stringify(snapshot),actor.membershipId]);
         published++;
       }
@@ -154,6 +191,6 @@ export class AssessmentService {
   async guardianReports(client: PoolClient, actor: Actor, learnerId: string) {
     const link = (await client.query('SELECT id FROM guardian_links WHERE school_id=$1 AND learner_id=$2 AND guardian_membership_id=$3 AND academic=true AND verified_at IS NOT NULL AND revoked_at IS NULL FOR SHARE',[actor.schoolId,learnerId,actor.membershipId])).rows[0];
     if (!link) throw new NotFoundException('Child unavailable');
-    return {items:(await client.query('SELECT id,term_id,snapshot,published_at FROM terminal_reports WHERE school_id=$1 AND learner_id=$2 ORDER BY published_at DESC,id',[actor.schoolId,learnerId])).rows};
+    return {items:(await client.query('SELECT DISTINCT ON (term_id) id,term_id,snapshot,published_at,revision,correction_reason FROM terminal_reports WHERE school_id=$1 AND learner_id=$2 ORDER BY term_id,revision DESC',[actor.schoolId,learnerId])).rows};
   }
 }

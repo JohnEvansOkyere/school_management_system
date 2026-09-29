@@ -34,3 +34,9 @@ export class RecordScoresDto extends OperationDto {
 }
 export class TermQueryDto { @IsUUID() termId!: string; @IsOptional() @IsUUID() subjectId?: string; }
 export class PublishDto extends OperationDto { @IsUUID() termId!: string; @IsOptional() @IsBoolean() acknowledgeIncomplete?: boolean; }
+export class ReopenDto extends OperationDto {
+  @IsUUID() termId!: string;
+  @IsUUID() learnerId!: string;
+  @IsString() @MinLength(3) @MaxLength(500) @Matches(/\S.*\S/) reason!: string;
+}
+export class ReissueDto extends OperationDto { @IsUUID() termId!: string; @IsUUID() learnerId!: string; @IsOptional() @IsBoolean() acknowledgeIncomplete?: boolean; }

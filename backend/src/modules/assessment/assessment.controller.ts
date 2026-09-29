@@ -2,7 +2,7 @@ import { Body, Controller, Get, Param, ParseUUIDPipe, Post, Put, Query, Req } fr
 import { Request } from 'express';
 import { Access } from '../../core/access';
 import { AssessmentService } from './assessment.service';
-import { PolicyDto, PublishDto, RecordScoresDto, SubjectDto, TermDto, TermQueryDto } from './assessment.dto';
+import { PolicyDto, PublishDto, RecordScoresDto, ReissueDto, ReopenDto, SubjectDto, TermDto, TermQueryDto } from './assessment.dto';
 
 const head = ['headteacher'], staff = ['headteacher','teacher'];
 @Controller('api/v1/schools/:schoolId')
@@ -47,6 +47,14 @@ export class AssessmentController {
   @Post('assessment/classes/:classId/publish')
   publish(@Req() req: Request,@Param('schoolId',new ParseUUIDPipe()) schoolId: string,@Param('classId',new ParseUUIDPipe()) classId: string,@Body() body: PublishDto) {
     return this.access.school(req,schoolId,head,(client,actor) => this.assessment.publish(client,actor,classId,body),true);
+  }
+  @Post('assessment/classes/:classId/reopen')
+  reopen(@Req() req: Request,@Param('schoolId',new ParseUUIDPipe()) schoolId: string,@Param('classId',new ParseUUIDPipe()) classId: string,@Body() body: ReopenDto) {
+    return this.access.school(req,schoolId,head,(client,actor) => this.assessment.reopen(client,actor,classId,body),true);
+  }
+  @Post('assessment/classes/:classId/reissue')
+  reissue(@Req() req: Request,@Param('schoolId',new ParseUUIDPipe()) schoolId: string,@Param('classId',new ParseUUIDPipe()) classId: string,@Body() body: ReissueDto) {
+    return this.access.school(req,schoolId,head,(client,actor) => this.assessment.reissue(client,actor,classId,body),true);
   }
   @Get('guardian/children/:learnerId/terminal-reports')
   guardianReports(@Req() req: Request,@Param('schoolId',new ParseUUIDPipe()) schoolId: string,@Param('learnerId',new ParseUUIDPipe()) learnerId: string) {

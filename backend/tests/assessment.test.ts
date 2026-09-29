@@ -88,3 +88,24 @@ test('publishing needs acknowledgement for incomplete learners, locks scores and
   assert.equal((await call(`/guardian/children/${kids[0]}/terminal-reports`,'GET',undefined,head)).status,403);
   assert.equal((await call(`/assessment/subjects`,'GET',undefined,head,other)).status,404);
 });
+
+test('published reports are corrected only by a reasoned reopening and a new revision; guardians see the latest',async()=>{
+  const op=()=>randomUUID(),reopenBody={operationId:op(),termId,learnerId:kids[0],reason:'Exam score was keyed in wrongly'};
+  assert.equal((await call(`/assessment/classes/${cls}/reopen`,'POST',reopenBody,teacher)).status,403);
+  assert.equal((await call(`/assessment/classes/${cls}/reopen`,'POST',{...reopenBody,operationId:op(),reason:'x'})).status,400);
+  assert.equal((await call(`/assessment/classes/${cls}/reissue`,'POST',{operationId:op(),termId,learnerId:kids[0]})).status,409);
+  assert.equal((await call(`/assessment/classes/${cls}/scores`,'POST',{operationId:op(),termId,subjectId:maths,scores:[{learnerId:kids[0],kind:'exam',score:95}]})).status,409);
+  assert.equal((await call(`/assessment/classes/${cls}/reopen`,'POST',reopenBody)).status,201);
+  assert.equal((await call(`/assessment/classes/${cls}/reopen`,'POST',{...reopenBody,operationId:op()})).status,409);
+  const grid=(await call(`/assessment/classes/${cls}/grid?termId=${termId}`)).body.items;assert.equal(grid.find((row:any)=>row.learnerId===kids[0]).locked,false);assert.equal(grid.find((row:any)=>row.learnerId===kids[1]).locked,true);
+  assert.equal((await call(`/assessment/classes/${cls}/scores`,'POST',{operationId:op(),termId,subjectId:maths,scores:[{learnerId:kids[1],kind:'exam',score:10}]})).status,409);
+  assert.equal((await call(`/assessment/classes/${cls}/scores`,'POST',{operationId:op(),termId,subjectId:maths,scores:[{learnerId:kids[0],kind:'exam',score:95}]})).status,201);
+  const before=(await call(`/guardian/children/${kids[0]}/terminal-reports`,'GET',undefined,guardian)).body.items;assert.equal(before[0].revision,1);
+  const issued=await call(`/assessment/classes/${cls}/reissue`,'POST',{operationId:op(),termId,learnerId:kids[0]});assert.equal(issued.status,201,JSON.stringify(issued.body));assert.equal(issued.body.revision,2);
+  const after=(await call(`/guardian/children/${kids[0]}/terminal-reports`,'GET',undefined,guardian)).body.items;assert.equal(after.length,1);assert.equal(after[0].revision,2);assert.equal(after[0].correction_reason,'Exam score was keyed in wrongly');
+  assert.equal(after[0].snapshot.subjects.find((s:any)=>s.name==='Mathematics').exam,95);
+  assert.equal((await owner.query('SELECT count(*) FROM terminal_reports WHERE learner_id=$1',[kids[0]])).rows[0].count,'2');
+  assert.equal((await call(`/assessment/classes/${cls}/scores`,'POST',{operationId:op(),termId,subjectId:maths,scores:[{learnerId:kids[0],kind:'exam',score:50}]})).status,409);
+  assert.equal((await call(`/assessment/classes/${cls}/reissue`,'POST',{operationId:op(),termId,learnerId:kids[0]})).status,409);
+  const actions=(await call('/audit?limit=100')).body.items.map((row:any)=>row.action);for(const a of ['assessment.report.reopened','assessment.report.reissued'])assert.ok(actions.includes(a),a);
+});

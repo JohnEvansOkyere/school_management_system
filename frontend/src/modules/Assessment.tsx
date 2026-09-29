@@ -8,7 +8,7 @@ type ClassOption = { id: string; name: string; level: string; year_name: string 
 type Year = { id: string; name: string };
 type Band = { min: number; grade: string; remark: string };
 type Policy = { ca_weight: number; exam_weight: number; bands: Band[]; source_note: string; version: number } | null;
-type GridRow = { learnerId: string; fullName: string; admissionNumber: string; ca: number | null; exam: number | null; locked: boolean };
+type GridRow = { learnerId: string; fullName: string; admissionNumber: string; ca: number | null; exam: number | null; locked: boolean; published: boolean };
 type Result = { learnerId: string; fullName: string; complete: boolean; average: number | null; position: number | null; subjects: { name: string; total: number | null; grade: string | null }[] };
 
 const bandsToText = (bands: Band[]) => bands.map(b => `${b.min},${b.grade},${b.remark}`).join('\n');
@@ -72,6 +72,9 @@ export function Assessment({ schoolId, csrfToken, role }: { schoolId: string; cs
     const result = await send<{ written: number }>(`/assessment/classes/${classId}/scores`, 'POST', { termId, subjectId, scores });
     await loadGrid(); setMessage(`Saved ${result.written} score(s).`);
   });
+  const reopen = (row: GridRow) => { const reason = window.prompt(`Why is ${row.fullName}'s published report being corrected? This is recorded.`); if (!reason || reason.trim().length < 3) return;
+    void act(async () => { await send(`/assessment/classes/${classId}/reopen`, 'POST', { termId, learnerId: row.learnerId, reason }); await loadGrid(); setMessage(`${row.fullName}'s report is open for correction. Fix the scores, then publish the corrected report.`); }); };
+  const reissue = (row: GridRow) => void act(async () => { const r = await send<{ revision: number }>(`/assessment/classes/${classId}/reissue`, 'POST', { termId, learnerId: row.learnerId, acknowledgeIncomplete: false }); await loadGrid(); setMessage(`Corrected report published (revision ${r.revision}).`); });
   const preview = () => void act(async () => { setResults((await request<{ items: Result[] }>(`/schools/${schoolId}/assessment/classes/${classId}/results?termId=${termId}`)).items); });
   const publish = () => { if (!window.confirm('Publish terminal reports for this class? Scores will be locked and guardians can see them.')) return;
     void act(async () => {
@@ -100,9 +103,9 @@ export function Assessment({ schoolId, csrfToken, role }: { schoolId: string; cs
     <label>Class<select value={classId} onChange={e => setClassId(e.target.value)}><option value="">Choose a class</option>{classes.map(c => <option key={c.id} value={c.id}>{c.name} · {c.year_name}</option>)}</select></label>
     <label>Term<select value={termId} onChange={e => setTermId(e.target.value)}><option value="">Choose a term</option>{terms.map(t => <option key={t.id} value={t.id}>{t.name} · {t.year_name}</option>)}</select></label>
     <label>Subject<select value={subjectId} onChange={e => setSubjectId(e.target.value)}><option value="">Choose a subject</option>{subjects.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}</select></label>
-    {grid.length > 0 && <><table><thead><tr><th>Learner</th><th>Continuous assessment (0–100)</th><th>Exam (0–100)</th></tr></thead><tbody>
+    {grid.length > 0 && <><table><thead><tr><th>Learner</th><th>Continuous assessment (0–100)</th><th>Exam (0–100)</th>{head && <th>Published report</th>}</tr></thead><tbody>
       {grid.map(row => <tr key={row.learnerId}><td>{row.fullName}</td>{(['ca', 'exam'] as const).map(kind => <td key={kind}><input type="number" min={0} max={100} step="0.01" aria-label={`${row.fullName} ${kind === 'ca' ? 'continuous assessment' : 'exam'}`} disabled={row.locked}
-        value={edits[`${row.learnerId}:${kind}`] ?? (row[kind] ?? '')} onChange={e => setEdits({ ...edits, [`${row.learnerId}:${kind}`]: e.target.value })}/></td>)}</tr>)}</tbody></table>
+        value={edits[`${row.learnerId}:${kind}`] ?? (row[kind] ?? '')} onChange={e => setEdits({ ...edits, [`${row.learnerId}:${kind}`]: e.target.value })}/></td>)}{head && <td>{row.locked ? <button type="button" className="secondary" disabled={busy} onClick={() => reopen(row)}>Correct this report</button> : row.published ? <button type="button" disabled={busy} onClick={() => reissue(row)}>Publish corrected report</button> : '–'}</td>}</tr>)}</tbody></table>
       <div className="actions"><button disabled={busy || !policy} onClick={saveScores}>Save scores</button>{head && <button className="secondary" disabled={busy} onClick={preview}>Preview results</button>}</div></>}
     {results.length > 0 && <><h3>Results preview</h3><ul className="history">{results.map(r => <li key={r.learnerId}><strong>{r.fullName}{r.position ? ` · position ${r.position}` : ''}</strong><span>{r.complete ? `Average ${r.average}` : 'Missing scores'} · {r.subjects.map(s => `${s.name}: ${s.total ?? '–'}${s.grade ? ` (${s.grade})` : ''}`).join(' · ')}</span></li>)}</ul>
       <button disabled={busy} onClick={publish}>Publish terminal reports</button></>}
