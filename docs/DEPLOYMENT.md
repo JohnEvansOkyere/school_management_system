@@ -1,0 +1,74 @@
+# Deployment and pilot runbook
+
+Status: prepared and tested locally only. Nothing has been deployed; hosted migrations 021–025 are not applied. Every step below that touches hosted systems needs Evans's explicit approval at the time.
+
+## 1. What is deployed
+
+One container image (`Dockerfile`) run twice:
+
+| Process | Command | Notes |
+| --- | --- | --- |
+| API + web app | `node backend/dist/main.js` | Serves `/api/v1`, the built web app (`WEB_DIST`), `/healthz`, `/readyz`. Run **one** instance until the login limiter moves out of memory. |
+| Worker | `node backend/dist/jobs/worker.js` | Durable jobs (audit export). Needs `WORKER_DATABASE_URL`. |
+
+The API refuses to start in production if the database ledger is behind `backend/migrations` (`assertMigrated`); `/readyz` reports the same state.
+
+## 2. Environment (production)
+
+| Variable | Purpose |
+| --- | --- |
+| `NODE_ENV=production`, `DATABASE_TARGET=supabase` | Enables secure cookies, hosted-database rules |
+| `DATABASE_URL` | Supabase session-pooler URL for the restricted `school_app` role, `sslmode=verify-full`, `sslrootcert` path |
+| `WORKER_DATABASE_URL` | Same for `school_worker` |
+| `ALLOWED_HOSTS`, `ALLOWED_ORIGINS` | Public host name(s) and `https://` origin(s) |
+| `TRUST_PROXY` | Number of proxy hops in front of the API (usually `1`) |
+| `AUTH_MODE=password` | Interim email + temporary-password sign-in (until managed auth / SMS OTP) |
+| `PORT`, `HOST`, `WEB_DIST` | Set by the image (`3018`, `0.0.0.0`, `/app/frontend/dist`) |
+| `AI_ENABLED` | Leave **unset** for the pilot start (AI off) |
+
+Never put the `postgres` administrator URL on the API host. It is only used from Evans's machine for `db:migrate:supabase` and `platform-admin`.
+
+## 3. First-time setup (each step needs approval)
+
+1. Choose the host: any container platform with HTTPS, a health check on `/healthz`, and a region close to Supabase `eu-central-1`. Put the site behind HTTPS only (HSTS is sent by the API).
+2. Review then apply migrations 021–025 with the runner (preview first): `npm run db:migrate:supabase`, then `-- --apply`. Verify `npm run db:check:supabase`.
+3. Create the platform administrator: `DATABASE_TARGET=supabase npm run platform-admin -w backend -- "Evans" you@example.com` (prints a one-time password; change it at first sign-in).
+4. Deploy API and worker with the variables above; confirm `/readyz` is 200 and the login page loads over HTTPS.
+5. Sign in as the platform admin, create the pilot school and its headteacher (share the temporary password privately). The headteacher creates staff and guardian accounts.
+6. Rotate the `postgres` password after step 3 and keep it out of `.env`.
+
+## 4. Data protection gate (before any real learner record)
+
+- Register with, or confirm exemption from, the Data Protection Commission (Act 843).
+- Sign the Supabase DPA; record the region; document retention, deletion and breach-response procedures.
+- Sign a controller/processor agreement with the pilot school that states plainly that the platform administrator can open the school's data for support (each entry is audited and visible to the headteacher), that SMS and AI features are off, and who to contact for corrections.
+- Guardian consent/notice text approved by the school.
+
+## 5. Backups and restore drill
+
+- Enable Supabase point-in-time recovery, or schedule `pg_dump` to separate storage; target RPO ≤ 1 h, RTO ≤ 4 h.
+- Before go-live, restore into a scratch project with external sends disabled, run `db:check:supabase` and `/readyz` against it, and record the time taken.
+
+## 6. Monitoring
+
+- Uptime check on `/readyz`; alert on 503.
+- Structured JSON request logs (request ID, route, status, duration, school ID; no child data) — ship them to the host's log service; alert on 5xx rate.
+- Weekly: `platform.*` audit events per school, worker queue age (a metric is still to be built), disk and connection usage in Supabase.
+
+## 7. Known limits for the pilot
+
+- No MFA and no SMS OTP yet: accounts use temporary passwords chosen by their owners; enforce strong passwords in training. Arkesel/Moolre SMS is not built.
+- One API instance (in-memory login rate limiter); no automatic scaling.
+- No post-publication correction flow for terminal reports; payment reversals exist, fee waivers do not.
+- The Anthropic adapter is untested against the live API; AI stays off.
+- No offline mode: schools use the printable register during outages.
+
+## 8. Pilot go-live checklist
+
+- [ ] Data protection gate (section 4) complete
+- [ ] Migrations 021–025 applied and verified; `postgres` password rotated
+- [ ] Staging or first deployment passes: sign-in, create school, year/classes, learners, attendance, assessment, fees, promotion (use the synthetic demo school first)
+- [ ] Backups enabled and a restore drill recorded
+- [ ] Headteacher trained (accounts, registers, follow-up, scores, fees); one week of dual running with paper registers
+- [ ] Support contact and incident procedure agreed with the school
+- [ ] Rollback plan: keep the previous image tag; migrations here are additive, so rolling the image back is safe

@@ -47,7 +47,8 @@ Severity: **P0** breaks, or blocks any real school use · **P1** must fix before
   - Done 2026-09-29: `DATABASE_MIGRATION_URL` and stray `sslmode=` lines removed, `DATABASE_TARGET=local`; `db:check:supabase` passes as `school_app`. Rotating the Supabase admin password remains Evans's call.
   - Fix: delete `DATABASE_MIGRATION_URL` and the stray lines now; rotate the Supabase admin password if the file was ever shared, synced or backed up; set `DATABASE_TARGET=local` for day-to-day development.
   - Verify: `grep -c DATABASE_MIGRATION_URL .env` returns 0; `npm run db:check:supabase` still passes with `school_app`.
-- [ ] **No production build/serve path.** The SPA is only served by the Vite dev server with a proxy; there is no static hosting config, Dockerfile, process manager, or HTTPS/CSP setup for the web app.
+- [ ] **No production build/serve path.**
+  - Partly done 2026-09-29: `Dockerfile` (API + worker), API serves the built web app with SPA fallback and security headers, startup refuses a database behind the migrations, runbook in docs/DEPLOYMENT.md. Still open: an actual staging deploy and the browser suite against it. The SPA is only served by the Vite dev server with a proxy; there is no static hosting config, Dockerfile, process manager, or HTTPS/CSP setup for the web app.
   - Fix: serve `frontend/dist` from a static host/CDN (or from Nest with `ServeStatic`) behind HTTPS with a strict CSP; one deployment manifest for API + worker; `secure` cookies always on outside local.
   - Verify: a staging deploy passes the browser suite against the staging URL.
 

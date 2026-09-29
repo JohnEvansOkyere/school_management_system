@@ -3,12 +3,15 @@ import { NestFactory } from '@nestjs/core';
 import { ValidationPipe } from '@nestjs/common';
 import { Request, Response, NextFunction } from 'express';
 import helmet from 'helmet';
+import express from 'express';
+import { existsSync } from 'node:fs';
+import path from 'node:path';
 import { AppModule } from './app.module';
 import { ApiErrors } from './core/errors';
 import { randomUUID } from 'node:crypto';
 import { Database } from './core/database';
 import { serverConfig } from './core/config';
-import { readiness } from './core/health';
+import { assertMigrated, readiness } from './core/health';
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 interface AppOptions { env?: NodeJS.ProcessEnv; log?: (line: string) => void }
 export async function createApp({env = process.env, log = (line: string) => console.log(line)}: AppOptions = {}) {
@@ -41,9 +44,26 @@ export async function createApp({env = process.env, log = (line: string) => cons
     }
     next();
   });
+  // Optional single-process deployment: the API also serves the built web app (WEB_DIST), with a single-page-app fallback.
+  const webDist = env.WEB_DIST ? path.resolve(env.WEB_DIST) : '';
+  if (webDist && existsSync(path.join(webDist,'index.html'))) {
+    app.use('/assets',express.static(path.join(webDist,'assets'),{immutable:true,maxAge:'1y',fallthrough:false}));
+    app.use(express.static(webDist,{index:false,maxAge:0}));
+    app.use((req:Request,res:Response,next:NextFunction) => {
+      if ((req.method !== 'GET' && req.method !== 'HEAD') || req.path.startsWith('/api/') || req.path === '/healthz' || req.path === '/readyz') return next();
+      res.setHeader('cache-control','no-cache');res.sendFile(path.join(webDist,'index.html'));
+    });
+  }
   app.useGlobalPipes(new ValidationPipe({whitelist:true,forbidNonWhitelisted:true,transform:true}));
   app.useGlobalFilters(new ApiErrors());
   app.enableShutdownHooks();
   return app;
 }
-if (require.main === module) createApp().then(app => { const {port,host} = serverConfig(); return app.listen(port,host); });
+if (require.main === module) {
+  createApp().then(async app => {
+    // In production, refuse to start against a database that is behind the bundled migrations.
+    if (process.env.NODE_ENV === 'production') await assertMigrated(app.get(Database).pool);
+    const {port,host} = serverConfig();
+    return app.listen(port,host);
+  }).catch(error => { console.error(error instanceof Error ? error.message : 'Startup failed'); process.exit(1); });
+}

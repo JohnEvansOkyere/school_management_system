@@ -1,0 +1,10 @@
+node_modules
+**/node_modules
+.local
+.env
+.git
+outreach
+test-results
+playwright-report
+backend/dist
+frontend/dist

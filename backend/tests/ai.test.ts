@@ -90,3 +90,17 @@ test('access rules: no observed entries, unassigned classes, other schools and g
   assert.equal((await call('/ai/early-years/report-draft','POST',{learnerId:learner,enrolmentId:enrolment,periodStart:period.periodEnd,periodEnd:period.periodStart})).status,400);
   assert.equal(calls,before);
 });
+
+test('OpenAI adapter sends a JSON-mode chat request and parses content and usage; provider selection follows env',async()=>{
+  const {OpenAiProvider,configuredProvider}=require('../dist/modules/ai/ai.provider');
+  const realFetch=globalThis.fetch;let seen:any;
+  globalThis.fetch=(async(url:string,init:any)=>{seen={url,init,body:JSON.parse(init.body)};return new Response(JSON.stringify({choices:[{message:{content:'{"ok":true}'}}],usage:{prompt_tokens:11,completion_tokens:7}}),{status:200});}) as any;
+  try{
+    const provider=new OpenAiProvider('sk-test');const out=await provider.complete({system:'sys',user:'usr',maxTokens:300});
+    assert.equal(seen.url,'https://api.openai.com/v1/chat/completions');assert.equal(seen.init.headers.authorization,'Bearer sk-test');assert.equal(seen.body.model,'gpt-4o-mini');assert.equal(seen.body.response_format.type,'json_object');assert.deepEqual(seen.body.messages.map((m:any)=>m.role),['system','user']);
+    assert.deepEqual(out,{text:'{"ok":true}',inputTokens:11,outputTokens:7});
+    globalThis.fetch=(async()=>new Response('{}',{status:429})) as any;await assert.rejects(provider.complete({system:'s',user:'u',maxTokens:10}),/429/);
+  }finally{globalThis.fetch=realFetch;}
+  assert.equal(configuredProvider({}),null);assert.equal(configuredProvider({OPENAI_API_KEY:'k'}).name,'openai');assert.equal(configuredProvider({OPENAI_API_KEY:'k',AI_MODEL:'gpt-x'}).model,'gpt-x');
+  assert.equal(configuredProvider({AI_PROVIDER:'anthropic',ANTHROPIC_API_KEY:'k'}).name,'anthropic');assert.equal(configuredProvider({AI_PROVIDER:'anthropic',OPENAI_API_KEY:'k'}),null);
+});

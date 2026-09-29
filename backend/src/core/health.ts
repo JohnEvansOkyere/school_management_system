@@ -14,3 +14,9 @@ export async function readiness(pool: Pick<Pool, 'query'>, migrationsDir = bundl
   } catch { checks.migrations = 'unknown'; }
   return { ready: checks.migrations === 'ok', checks };
 }
+
+export async function assertMigrated(pool: Pick<Pool, 'query'>, migrationsDir = bundledMigrations) {
+  const result = await readiness(pool,migrationsDir);
+  if (result.checks.database !== 'ok') throw new Error('Database is not reachable; refusing to start');
+  if (result.checks.migrations !== 'ok') throw new Error(`Database migrations are ${result.checks.migrations}; apply the reviewed migrations before starting this version`);
+}

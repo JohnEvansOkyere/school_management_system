@@ -113,3 +113,24 @@ test('each request is logged once as structured JSON without query strings or ch
   assert.equal(entry.schoolId,schoolA);assert.equal(typeof entry.durationMs,'number');
   assert.doesNotMatch(lines.join('\n'),/Synthetic|search=|school_session|=[a-f0-9]{64}/);
 });
+
+test('the API serves the built web app with a single-page fallback, never for /api paths',async()=>{
+  const dir=mkdtempSync(path.join(os.tmpdir(),'web-'));
+  writeFileSync(path.join(dir,'index.html'),'<!doctype html><title>School workspace</title><div id="root"></div>');
+  const {mkdirSync}=require('node:fs');mkdirSync(path.join(dir,'assets'));writeFileSync(path.join(dir,'assets','app.js'),'console.log(1)');
+  const {port}=await start({WEB_DIST:dir,ALLOWED_HOSTS:'app.example.test'});
+  const home=await new Promise<any>(resolve=>http.get({host:'127.0.0.1',port,path:'/',headers:{host:'app.example.test'}},res=>{let body='';res.on('data',c=>body+=c);res.on('end',()=>resolve({status:res.statusCode,headers:res.headers,body}));}));
+  assert.equal(home.status,200);assert.match(home.body,/School workspace/);assert.equal(home.headers['cache-control'],'no-cache');assert.ok(home.headers['content-security-policy']);assert.ok(home.headers['x-content-type-options']);
+  const deep=await new Promise<any>(resolve=>http.get({host:'127.0.0.1',port,path:'/learners/anything',headers:{host:'app.example.test'}},res=>{let body='';res.on('data',c=>body+=c);res.on('end',()=>resolve({status:res.statusCode,body}));}));assert.equal(deep.status,200);assert.match(deep.body,/School workspace/);
+  const asset=await raw(port,'GET','/assets/app.js',{host:'app.example.test'});assert.equal(asset.status,200);assert.match(String(asset.headers['cache-control']),/immutable/);
+  const api=await raw(port,'GET','/api/v1/does-not-exist',{host:'app.example.test'});assert.equal(api.status,404);assert.equal(typeof api.json?.message,'string');
+  assert.equal((await raw(port,'GET','/',{host:'evil.example.test'})).status,403);
+});
+
+test('startup refuses a database that is behind the bundled migrations',async()=>{
+  const {assertMigrated}=require('../dist/core/health');
+  const {app}=await start();const pool=app.get(Database).pool;
+  await assertMigrated(pool);
+  const dir=mkdtempSync(path.join(os.tmpdir(),'migrations-'));for(const name of readdirSync(path.resolve(__dirname,'../migrations')))writeFileSync(path.join(dir,name),'-- bundled');writeFileSync(path.join(dir,'999_future.sql'),'-- newer');
+  await assert.rejects(assertMigrated(pool,dir),/behind/);
+});

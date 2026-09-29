@@ -1,4 +1,4 @@
-import { AnthropicProvider } from '../src/modules/ai/ai.provider';
+import { configuredProvider } from '../src/modules/ai/ai.provider';
 import { ObservationFact, buildPrompt, templateDraft, validateDraft } from '../src/modules/ai/early-years-draft';
 
 // Synthetic Ghana-school evaluation cases. Offline checks always run; live-model checks run only when ANTHROPIC_API_KEY is set.
@@ -21,10 +21,10 @@ async function main() {
     check(!/name|admission/i.test(prompt.user.replace(/"evidence":"[^"]*"/g, '')), `prompt carries no identity fields: ${testCase.name}`);
   }
   check(!validateDraft(JSON.stringify({ strengths: 'The child may have dyslexia.', nextSteps: 'Keep going now.', citations: ['o1'] }), [fact('o1')]).ok, 'diagnosis language is rejected');
-  const key = process.env.ANTHROPIC_API_KEY;
-  if (!key) console.log('SKIP  live-model cases (set ANTHROPIC_API_KEY to run them)');
+  const provider = configuredProvider();
+  if (!provider) console.log('SKIP  live-model cases (set OPENAI_API_KEY, or AI_PROVIDER=anthropic with ANTHROPIC_API_KEY)');
   else {
-    const provider = new AnthropicProvider(key, process.env.AI_MODEL || undefined);
+    console.log(`Live provider: ${provider.name} / ${provider.model}`);
     for (const testCase of cases) {
       const prompt = buildPrompt(testCase.facts, 'KG');
       try {

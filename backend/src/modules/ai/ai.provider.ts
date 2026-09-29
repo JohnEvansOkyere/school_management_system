@@ -21,6 +21,28 @@ export class AnthropicProvider implements AiProvider {
   }
 }
 
+// OpenAI Chat Completions API (cheap default model). JSON mode keeps replies machine-checkable; the reply is still validated.
+export class OpenAiProvider implements AiProvider {
+  readonly name = 'openai';
+  readonly model: string;
+  constructor(private readonly apiKey: string, model = 'gpt-4o-mini', private readonly timeoutMs = 20_000, private readonly baseUrl = 'https://api.openai.com') { this.model = model; }
+  async complete(prompt: AiPrompt): Promise<AiCompletion> {
+    const response = await fetch(`${this.baseUrl}/v1/chat/completions`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', authorization: `Bearer ${this.apiKey}` },
+      body: JSON.stringify({ model: this.model, max_tokens: prompt.maxTokens, temperature: 0.3, response_format: { type: 'json_object' }, messages: [{ role: 'system', content: prompt.system }, { role: 'user', content: prompt.user }] }),
+      signal: AbortSignal.timeout(this.timeoutMs),
+    });
+    if (!response.ok) throw new Error(`Provider returned ${response.status}`);
+    const data = await response.json() as { choices?: { message?: { content?: string | null } }[]; usage?: { prompt_tokens?: number; completion_tokens?: number } };
+    return { text: data.choices?.[0]?.message?.content ?? '', inputTokens: data.usage?.prompt_tokens ?? null, outputTokens: data.usage?.completion_tokens ?? null };
+  }
+}
+
+// AI_PROVIDER selects the adapter (default "openai"). Keys: OPENAI_API_KEY or ANTHROPIC_API_KEY; AI_MODEL overrides the model.
 export function configuredProvider(env: NodeJS.ProcessEnv = process.env): AiProvider | null {
-  return env.ANTHROPIC_API_KEY ? new AnthropicProvider(env.ANTHROPIC_API_KEY, env.AI_MODEL || undefined) : null;
+  const choice = (env.AI_PROVIDER || 'openai').toLowerCase();
+  if (choice === 'openai' && env.OPENAI_API_KEY) return new OpenAiProvider(env.OPENAI_API_KEY, env.AI_MODEL || undefined);
+  if (choice === 'anthropic' && env.ANTHROPIC_API_KEY) return new AnthropicProvider(env.ANTHROPIC_API_KEY, env.AI_MODEL || undefined);
+  return null;
 }
