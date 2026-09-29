@@ -31,7 +31,8 @@ Severity: **P0** breaks, or blocks any real school use · **P1** must fix before
 
 ### P0 — broken now or blocks any real deployment
 
-- [ ] **API refuses every non-localhost request.** `backend/src/main.ts:15` rejects any `Host` other than `127.0.0.1/localhost/[::1]`; `:16` only accepts `http://` origins; `:30` binds `127.0.0.1:3018`. Any hosted deploy returns `403 Local host required` for all traffic.
+- [x] **API refuses every non-localhost request.** `backend/src/main.ts:15` rejects any `Host` other than `127.0.0.1/localhost/[::1]`; `:16` only accepts `http://` origins; `:30` binds `127.0.0.1:3018`. Any hosted deploy returns `403 Local host required` for all traffic.
+  - Done 2026-09-29 (code and tests only; nothing deployed): `ALLOWED_HOSTS`, `ALLOWED_ORIGINS` (https), `PORT`, `HOST`, `TRUST_PROXY` in `core/config.ts`; API tests cover allowed/denied hosts and origins.
   - Fix: read `ALLOWED_HOSTS`, `ALLOWED_ORIGINS` (https), `PORT` and `HOST` from env; keep the localhost defaults for dev; set `trust proxy` to the platform's proxy count only.
   - Verify: API test with a configured host/origin passes; unknown host/origin still returns 403.
 - [ ] **No real sign-in exists.** Login only works with `DEV_AUTH=synthetic-local` from loopback (`identity.controller.ts:16`). No school can use the product until managed OIDC (or reviewed password + recovery) and MFA for headteachers/accountants ship.
@@ -54,6 +55,7 @@ Severity: **P0** breaks, or blocks any real school use · **P1** must fix before
   - Fix: enable Supabase PITR (paid tier) or scheduled `pg_dump` to separate storage; write and rehearse a restore runbook that keeps external sends disabled.
   - Verify: timed restore into a scratch project; record RPO/RTO achieved.
 - [ ] **No observability.** Only 5xx errors are logged (`core/errors.ts`); no access log, latency, queue age, worker health or alerting. A request ID is generated but not logged on success.
+  - Partly done 2026-09-29: structured JSON request logs, `/healthz`, `/readyz` (DB + ledger via migration 020 function). Still open: worker heartbeat/queue age, error alerting.
   - Fix: structured request logs (request ID, route, status, duration, school ID — no child data), `/healthz` and `/readyz` (DB + migration ledger), worker heartbeat and queue-age metric, error alerting (e.g. Sentry with PII scrubbing).
   - Verify: an induced 500 and a stalled worker both raise an alert.
 - [ ] **Login rate limiter is not deployable.** In-memory per-IP map (`main.ts:20`): behind a proxy every user shares one IP bucket (30 attempts/min for the whole school), it resets on restart, and doesn't work across instances. `scryptSync` (`identity.controller.ts:19`) blocks the event loop per attempt.
@@ -68,12 +70,14 @@ Severity: **P0** breaks, or blocks any real school use · **P1** must fix before
   - Fix: create a fresh database from a migrated template per test run (`CREATE DATABASE … TEMPLATE`), or truncate synthetic fixtures before each suite; keep CI on a fresh cluster (already true).
   - Verify: the browser suite runs 10 times in a row without timeout.
 - [ ] **Silent list caps contradict the "no silent truncation" rule.** Classes and years are capped at 100 (`learners.controller.ts:11,15`), the audit view at 50 (`tenancy.controller.ts:31`), and audit export at 500 rows with a `truncated` flag (`jobs/worker.ts:32`). A school with ~15 classes per year exceeds 100 classes in 7 years; a busy term produces >500 audit events.
+  - Partly done 2026-09-29: classes (year filter), academic years and audit view are paged; tests use 150 classes and 2,000 audit events. Audit export is still capped at 500 rows.
   - Fix: page these endpoints like learners/admissions; filter classes by academic year; stream audit exports by date range into a private file (CSV) instead of a 500-row JSON blob in `outbox_jobs.result`.
   - Verify: API tests with 150 classes and 2,000 audit events.
 - [ ] **CSV onboarding will reject typical Ghana school spreadsheets.** Exact header `admission_number,full_name,date_of_birth`, ISO dates only (`imports.service.ts` `validDate`), 200 rows / 40 kB / one class per batch, and no guardian columns. Excel in Ghana usually exports `DD/MM/YYYY` and headers like "Admission No.".
   - Fix: accept a documented header alias list and `DD/MM/YYYY` with an explicit format picker and preview; offer a downloadable template; add a reviewed guardian-contact import that creates **pending** links (never auto-verified).
   - Verify: fixtures exported from Excel/Google Sheets with Ghana locale import cleanly; ambiguous dates (e.g. 03/04/2015) require explicit format choice.
-- [ ] **Frontend crashes on non-JSON errors.** `frontend/src/lib/api.ts:3` calls `response.json()` unconditionally; a proxy 502/504 HTML page or network drop shows "Unexpected token <" and leaves no retry path.
+- [x] **Frontend crashes on non-JSON errors.** `frontend/src/lib/api.ts:3` calls `response.json()` unconditionally; a proxy 502/504 HTML page or network drop shows "Unexpected token <" and leaves no retry path.
+  - Done 2026-09-29: `api.ts` maps network/HTML/5xx failures to a plain retry message; browser test covers a 502 HTML page and a refused connection.
   - Fix: check `content-type`, map network/5xx to a plain-language "Connection problem — your changes were not saved, try again" message, keep the operation ID for retry.
   - Verify: browser test with the API stopped mid-save.
 - [ ] **Data-protection gate.** Ghana's Data Protection Act, 2012 (Act 843) requires registration with the Data Protection Commission and a lawful basis for child data; Supabase region, processor contract and retention are not yet documented.

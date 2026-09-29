@@ -3,7 +3,7 @@ import { PoolClient } from 'pg';
 import { randomUUID } from 'node:crypto';
 import { Actor } from '../../core/access';
 import { audit,command } from '../../core/commands';
-import { AdmissionDto,ClassDto,PageDto,TransferDto,TransitionDto,WithdrawalDto,YearDto } from './learners.dto';
+import { AdmissionDto,ClassDto,ClassPageDto,PageDto,TransferDto,TransitionDto,WithdrawalDto,YearDto } from './learners.dto';
 @Injectable()
 export class LearnersService {
   async lockIdentityCatalog(client:PoolClient,schoolId:string){await client.query('SELECT pg_advisory_xact_lock(hashtextextended($1,0))',[`${schoolId}:learner-identity-catalog`]);}
@@ -15,6 +15,17 @@ export class LearnersService {
     const join=table==='admissions'?'JOIN class_sections c ON c.school_id=a.school_id AND c.id=a.class_id':'';
     const order=table==='admissions'?'a.created_at DESC,a.id':'a.full_name,a.id';
     const items=(await client.query(`SELECT ${select} FROM ${table} a ${join} WHERE ${filter} ORDER BY ${order} LIMIT $3 OFFSET $4`,[schoolId,search,page.limit,page.offset])).rows;
+    return {items,total,limit:page.limit,offset:page.offset};
+  }
+  async years(client:PoolClient,schoolId:string,page:PageDto) {
+    const total=Number((await client.query('SELECT count(*) FROM academic_years WHERE school_id=$1',[schoolId])).rows[0].count);
+    const items=(await client.query('SELECT id,name,start_date::text,end_date::text FROM academic_years WHERE school_id=$1 ORDER BY start_date DESC,id LIMIT $2 OFFSET $3',[schoolId,page.limit,page.offset])).rows;
+    return {items,total,limit:page.limit,offset:page.offset};
+  }
+  async classes(client:PoolClient,schoolId:string,page:ClassPageDto) {
+    const filter='c.school_id=$1 AND ($2::uuid IS NULL OR c.academic_year_id=$2)',values=[schoolId,page.academicYearId??null];
+    const total=Number((await client.query(`SELECT count(*) FROM class_sections c WHERE ${filter}`,values)).rows[0].count);
+    const items=(await client.query(`SELECT c.id,c.name,c.level,c.capacity,c.academic_year_id,y.name AS year_name,y.start_date::text,y.end_date::text FROM class_sections c JOIN academic_years y ON y.school_id=c.school_id AND y.id=c.academic_year_id WHERE ${filter} ORDER BY y.start_date DESC,c.name,c.id LIMIT $3 OFFSET $4`,[...values,page.limit,page.offset])).rows;
     return {items,total,limit:page.limit,offset:page.offset};
   }
   async classForDate(client:PoolClient,schoolId:string,classId:string,date:string) {

@@ -5,6 +5,7 @@ export class PageDto {
   @Type(()=>Number) @IsInt() @Min(1) @Max(100) limit=25;
   @IsOptional() @IsString() @MaxLength(120) search?:string;
 }
+export class ClassPageDto extends PageDto { @IsOptional() @IsUUID() academicYearId?:string }
 export class OperationDto { @IsUUID() operationId!:string }
 export class YearDto extends OperationDto {
   @IsString() @MinLength(3) @MaxLength(80) @Matches(/\S.{1,}\S/) name!:string;

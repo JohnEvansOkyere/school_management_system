@@ -19,6 +19,8 @@ const dateToday = () => new Date().toLocaleDateString('sv-SE', { timeZone: 'Afri
 export function Admissions({ schoolId, csrfToken, role }: Props) {
   const [years, setYears] = useState<AcademicYear[]>([]);
   const [classes, setClasses] = useState<SchoolClass[]>([]);
+  const [yearsTotal, setYearsTotal] = useState(0);
+  const [classesTotal, setClassesTotal] = useState(0);
   const [admissions, setAdmissions] = useState<Admission[]>([]);
   const [learners, setLearners] = useState<Learner[]>([]);
   const [admissionsTotal, setAdmissionsTotal] = useState(0);
@@ -70,16 +72,24 @@ export function Admissions({ schoolId, csrfToken, role }: Props) {
       if (admissionsSearch.trim()) admissionQuery.set('search', admissionsSearch.trim());
       if (learnersSearch.trim()) learnerQuery.set('search', learnersSearch.trim());
       const [yearRows, classRows, admissionRows, learnerRows] = await Promise.all([
-        request<AcademicYear[]>(`/schools/${schoolId}/academic-years`),
-        request<SchoolClass[]>(`/schools/${schoolId}/classes`),
+        request<Page<AcademicYear>>(`/schools/${schoolId}/academic-years?limit=100`),
+        request<Page<SchoolClass>>(`/schools/${schoolId}/classes?limit=100`),
         request<Page<Admission>>(`/schools/${schoolId}/admissions?${admissionQuery.toString()}`),
         request<Page<Learner>>(`/schools/${schoolId}/learners?${learnerQuery.toString()}`),
       ]);
       if (!alive.current || workspaceEpoch.current !== epoch) return;
-      setYears(yearRows); setClasses(classRows); setAdmissions(admissionRows.items); setAdmissionsTotal(admissionRows.total); setLearners(learnerRows.items); setLearnersTotal(learnerRows.total);
+      setYears(yearRows.items); setYearsTotal(yearRows.total); setClasses(classRows.items); setClassesTotal(classRows.total); setAdmissions(admissionRows.items); setAdmissionsTotal(admissionRows.total); setLearners(learnerRows.items); setLearnersTotal(learnerRows.total);
     } catch (e) { if (alive.current && workspaceEpoch.current === epoch) setError((e as Error).message); }
     finally { if (alive.current && workspaceEpoch.current === epoch && initial) setLoading(false); }
   }, [schoolId, admissionsOffset, admissionsSearch, learnersOffset, learnersSearch]);
+
+  const loadMore = async (kind: 'academic-years' | 'classes') => {
+    const loaded = kind === 'classes' ? classes.length : years.length;
+    try {
+      if (kind === 'classes') { const page = await request<Page<SchoolClass>>(`/schools/${schoolId}/classes?limit=100&offset=${loaded}`); if (alive.current) { setClasses(prior => [...prior, ...page.items]); setClassesTotal(page.total); } }
+      else { const page = await request<Page<AcademicYear>>(`/schools/${schoolId}/academic-years?limit=100&offset=${loaded}`); if (alive.current) { setYears(prior => [...prior, ...page.items]); setYearsTotal(page.total); } }
+    } catch (e) { if (alive.current) setError((e as Error).message); }
+  };
 
   useEffect(() => {
     alive.current = true;
@@ -231,9 +241,9 @@ export function Admissions({ schoolId, csrfToken, role }: Props) {
 
       {role === 'headteacher' && <div><button type="button" className="secondary" aria-expanded={setupOpen} onClick={()=>setSetupOpen(!setupOpen)}>School setup: academic years and classes</button>{setupOpen&&<div>
         <p className="muted">Class end dates are exclusive. Only headteachers can change school setup.</p>
-        <h3>Academic years</h3>{years.length ? <ul className="history">{years.map(y => <li key={y.id}><strong>{y.name}</strong><span>{y.start_date} to {y.end_date} (end date exclusive)</span></li>)}</ul> : <p>No academic years recorded.</p>}
+        <h3>Academic years</h3>{years.length ? <ul className="history">{years.map(y => <li key={y.id}><strong>{y.name}</strong><span>{y.start_date} to {y.end_date} (end date exclusive)</span></li>)}</ul> : <p>No academic years recorded.</p>}{years.length < yearsTotal && <p>Showing {years.length} of {yearsTotal} academic years. <button type="button" className="secondary" onClick={() => void loadMore('academic-years')}>Show more years</button></p>}
         <form onSubmit={createYear}><h4>Add academic year</h4><label>Year name<input value={newYear.name} onChange={e => setNewYear({ ...newYear, name: e.target.value })} required maxLength={80} placeholder="2026/2027"/></label><label>Start date<input type="date" value={newYear.startDate} onChange={e => setNewYear({ ...newYear, startDate: e.target.value })} required/></label><label>End date (exclusive)<input type="date" value={newYear.endDate} onChange={e => setNewYear({ ...newYear, endDate: e.target.value })} required/></label><button disabled={busy}>Add academic year</button></form>
-        <h3>Classes</h3>{classes.length ? <ul className="history">{classes.map(c => <li key={c.id}><strong>{c.name} · {c.level}</strong><span>{c.year_name} · Capacity {c.capacity} · {c.start_date} to {c.end_date}</span></li>)}</ul> : <p>No classes recorded.</p>}
+        <h3>Classes</h3>{classes.length ? <ul className="history">{classes.map(c => <li key={c.id}><strong>{c.name} · {c.level}</strong><span>{c.year_name} · Capacity {c.capacity} · {c.start_date} to {c.end_date}</span></li>)}</ul> : <p>No classes recorded.</p>}{classes.length < classesTotal && <p>Showing {classes.length} of {classesTotal} classes, newest year first. <button type="button" className="secondary" onClick={() => void loadMore('classes')}>Show more classes</button></p>}
         <form onSubmit={createClass}><h4>Add class</h4><label>Class name<input value={newClass.name} onChange={e => setNewClass({ ...newClass, name: e.target.value })} required maxLength={80} placeholder="Primary 1 Blue"/></label><label>Level<select value={newClass.level} onChange={e => setNewClass({ ...newClass, level: e.target.value as SchoolClass['level'] })}>{levels.map(level => <option key={level}>{level}</option>)}</select></label><label>Capacity<input type="number" min="1" max="500" step="1" value={newClass.capacity} onChange={e => setNewClass({ ...newClass, capacity: e.target.value })} required/></label><label>Academic year<select value={newClass.academicYearId} onChange={e => setNewClass({ ...newClass, academicYearId: e.target.value })} required><option value="">Choose an academic year</option>{years.map(y => <option key={y.id} value={y.id}>{y.name}</option>)}</select></label><button disabled={busy || !years.length}>Add class</button></form>
       </div>}</div>}
     </>}

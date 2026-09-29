@@ -6,16 +6,35 @@ import helmet from 'helmet';
 import { AppModule } from './app.module';
 import { ApiErrors } from './core/errors';
 import { randomUUID } from 'node:crypto';
-export async function createApp() {
+import { Database } from './core/database';
+import { serverConfig } from './core/config';
+import { readiness } from './core/health';
+const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+interface AppOptions { env?: NodeJS.ProcessEnv; log?: (line: string) => void }
+export async function createApp({env = process.env, log = (line: string) => console.log(line)}: AppOptions = {}) {
+  const config = serverConfig(env);
   const app = await NestFactory.create(AppModule,{logger:['error','warn']});
+  app.getHttpAdapter().getInstance().set('trust proxy',config.trustProxy);
   app.use(helmet());
   const attempts = new Map<string,{count:number;until:number}>();
   app.use((req:Request,res:Response,next:NextFunction) => {
-    res.setHeader('x-request-id',randomUUID());
-    if (!/^(127\.0\.0\.1|localhost|\[::1\])(?::\d+)?$/.test(req.headers.host??'')) return res.status(403).json({message:'Local host required'});
-    if (!['GET','HEAD','OPTIONS'].includes(req.method) && req.headers.origin && req.headers.origin !== `http://${req.headers.host}`) return res.status(403).json({message:'Request origin was not accepted'});
+    const requestId = randomUUID(), started = process.hrtime.bigint();
+    res.setHeader('x-request-id',requestId);
+    // Route pattern and school ID only: never the query string, body or path values that can identify a child.
+    res.on('finish',() => log(JSON.stringify({time:new Date().toISOString(),requestId,method:req.method,route:req.route?.path ?? 'unmatched',status:res.statusCode,durationMs:Math.round(Number(process.hrtime.bigint()-started)/1e4)/100,schoolId:typeof req.params?.schoolId === 'string' && uuid.test(req.params.schoolId) ? req.params.schoolId : undefined})));
+    next();
+  });
+  const database = app.get(Database);
+  app.use('/healthz',(_req:Request,res:Response) => res.json({status:'ok'}));
+  app.use('/readyz',async (_req:Request,res:Response) => {
+    const result = await readiness(database.pool,env.MIGRATIONS_DIR || undefined);
+    res.status(result.ready ? 200 : 503).json({status:result.ready ? 'ready' : 'not_ready',checks:result.checks});
+  });
+  app.use((req:Request,res:Response,next:NextFunction) => {
+    if (!config.hostAllowed(req.headers.host)) return res.status(403).json({message:'Host not allowed'});
+    if (!['GET','HEAD','OPTIONS'].includes(req.method) && req.headers.origin && !config.originAllowed(req.headers.origin,req.headers.host)) return res.status(403).json({message:'Request origin was not accepted'});
     if (req.path === '/api/v1/auth/login' && req.method === 'POST') {
-      const address=req.socket.remoteAddress??'unknown';const now=Date.now();
+      const address=req.ip??'unknown';const now=Date.now();
       for(const [key,value] of attempts)if(value.until<now)attempts.delete(key);
       const current=attempts.get(address)??{count:0,until:now+60_000};current.count++;attempts.set(address,current);
       if(current.count>30)return res.status(429).json({message:'Too many sign-in attempts. Try again in a minute'});
@@ -27,4 +46,4 @@ export async function createApp() {
   app.enableShutdownHooks();
   return app;
 }
-if (require.main === module) createApp().then(app => app.listen(3018,'127.0.0.1'));
+if (require.main === module) createApp().then(app => { const {port,host} = serverConfig(); return app.listen(port,host); });

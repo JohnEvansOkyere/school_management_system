@@ -189,3 +189,16 @@ test('Nursery report draft passes review, publishes and appears in the guardian 
   try{await signIn(guardianPage,'guardian@example.test');const guardianPanel=guardianPage.getByRole('region',{name:'Nursery and KG progress reports'});await guardianPanel.getByRole('combobox',{name:'Child'}).selectOption(reportLearner.id);const guardianReport=guardianPanel.locator('li').filter({hasText:learnerName});await expect(guardianReport).toContainText('Joined a shared activity and took turns with peers.');await expect(guardianReport).toContainText('Continue offering a chance to lead a short group activity.');expect(errors).toEqual([]);}
   finally{await context.close();}
 });
+test('connection and proxy failures show a plain-language retry message, not a parser error',async({page})=>{
+  const errors:string[]=[];page.on('pageerror',error=>errors.push(error.message));
+  await signIn(page);
+  await page.route('**/api/v1/schools/*/academic-years*',route=>route.fulfill({status:502,contentType:'text/html',body:'<html><body>Bad gateway</body></html>'}));
+  await page.reload();await page.getByRole('combobox',{name:'School',exact:true}).selectOption(school);
+  const panel=page.getByRole('region',{name:'Admissions and learners'});
+  await expect(panel.getByRole('alert')).toContainText('Wait a moment and try again');
+  await page.unroute('**/api/v1/schools/*/academic-years*');
+  await page.route('**/api/v1/schools/*/academic-years*',route=>route.abort('connectionrefused'));
+  await page.reload();await page.getByRole('combobox',{name:'School',exact:true}).selectOption(school);
+  await expect(panel.getByRole('alert')).toContainText('Your changes were not saved');
+  expect(errors.join(' ')).not.toContain('Unexpected token');
+});
