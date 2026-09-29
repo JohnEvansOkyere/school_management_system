@@ -8,6 +8,7 @@ import { AssessmentController } from './modules/assessment/assessment.controller
 import { AssessmentService } from './modules/assessment/assessment.service';
 import { FinanceController } from './modules/finance/finance.controller';
 import { FinanceService } from './modules/finance/finance.service';
+import { PromotionsController } from './modules/learners/promotions.controller';
 import { AccountsController } from './modules/staff/accounts.controller';
 import { TenancyController } from './modules/tenancy/tenancy.controller';
 import { ExportsController } from './modules/tenancy/exports.controller';
@@ -27,5 +28,5 @@ import { EarlyYearsController } from './modules/early-years/early-years.controll
 import { EarlyYearsService } from './modules/early-years/early-years.service';
 import { EarlyYearsReportsController } from './modules/early-years/reports.controller';
 import { EarlyYearsReportsService } from './modules/early-years/reports.service';
-@Module({controllers:[IdentityController,FinanceController,AssessmentController,AttendanceFollowUpController,AccountsController,PlatformController,TenancyController,ExportsController,LearnersController,LearnerImportsController,CollectionController,GuardiansController,TeachingController,AttendanceController,EarlyYearsController,EarlyYearsReportsController],providers:[FinanceService,AssessmentService,Database,Access,LearnersService,LearnerImportsService,CollectionService,GuardiansService,TeachingService,AttendanceService,EarlyYearsService,EarlyYearsReportsService]})
+@Module({controllers:[IdentityController,PromotionsController,FinanceController,AssessmentController,AttendanceFollowUpController,AccountsController,PlatformController,TenancyController,ExportsController,LearnersController,LearnerImportsController,CollectionController,GuardiansController,TeachingController,AttendanceController,EarlyYearsController,EarlyYearsReportsController],providers:[FinanceService,AssessmentService,Database,Access,LearnersService,LearnerImportsService,CollectionService,GuardiansService,TeachingService,AttendanceService,EarlyYearsService,EarlyYearsReportsService]})
 export class AppModule {}
