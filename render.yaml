@@ -1,0 +1,29 @@
+# Render Blueprint: the API (which also serves the web app) and the background worker run from the same Docker image.
+# Secrets are marked sync:false, so Render asks for them in the dashboard and they never live in git.
+services:
+  - type: web
+    name: school-api
+    runtime: docker
+    plan: starter            # the free plan sleeps after 15 idle minutes; a school needs it awake
+    healthCheckPath: /healthz
+    autoDeploy: true
+    envVars:
+      - { key: NODE_ENV, value: production }
+      - { key: DATABASE_TARGET, value: supabase }
+      - { key: DATABASE_URL, sync: false }        # school_app URL ...?sslmode=verify-full&sslrootcert=bundled
+      - { key: AUTH_MODE, value: password }
+      - { key: MFA_REQUIRED, value: "false" }     # pilot decision; see docs/DEPLOYMENT.md
+      - { key: MFA_ENCRYPTION_KEY, generateValue: true }
+      - { key: TRUST_PROXY, value: "2" }          # Render's load balancer + the Vercel proxy in front of it
+      - { key: ALLOWED_HOSTS, value: school-api.onrender.com }
+      - { key: ALLOWED_ORIGINS, sync: false }     # https://<your-vercel-domain>
+  - type: worker
+    name: school-worker
+    runtime: docker
+    plan: starter
+    dockerCommand: node backend/dist/jobs/worker.js
+    autoDeploy: true
+    envVars:
+      - { key: NODE_ENV, value: production }
+      - { key: DATABASE_TARGET, value: supabase }
+      - { key: WORKER_DATABASE_URL, sync: false } # school_worker URL, same TLS options

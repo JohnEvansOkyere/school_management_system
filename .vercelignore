@@ -1,4 +1,4 @@
-# Never upload contact lists, local databases, secrets or test output
+# The frontend is the only thing Vercel needs. Never upload contact lists, local databases, secrets or the backend.
 outreach
 .local
 .env
@@ -6,6 +6,6 @@ outreach
 e2e
 test-results
 playwright-report
-backend/tests
+backend
 docs
 *.md

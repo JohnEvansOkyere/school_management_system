@@ -17,8 +17,6 @@ export function serverConfig(env: Env = process.env) {
   if (!Number.isInteger(proxies) || proxies < 0 || proxies > 10) throw new Error('TRUST_PROXY must be the number of trusted proxy hops (0 to 10)');
   const hosts = list(env.ALLOWED_HOSTS).map(stripPort);
   const origins = list(env.ALLOWED_ORIGINS).map(origin => origin.replace(/\/$/, ''));
-  // On Vercel the deployment's own host names are trusted automatically (scope production secrets to the Production environment).
-  if (env.VERCEL) for (const own of list([env.VERCEL_PROJECT_PRODUCTION_URL, env.VERCEL_URL, env.VERCEL_BRANCH_URL].filter(Boolean).join(','))) { hosts.push(stripPort(own)); origins.push(`https://${own}`); }
   for (const origin of origins) if (!/^https:\/\/[a-z0-9.-]+(:\d+)?$/.test(origin)) throw new Error('ALLOWED_ORIGINS entries must be https origins such as https://app.example.com');
   return {
     port,

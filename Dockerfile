@@ -19,6 +19,7 @@ COPY --from=build /app/node_modules node_modules
 COPY --from=build /app/backend/package.json backend/
 COPY --from=build /app/backend/dist backend/dist
 COPY --from=build /app/backend/migrations backend/migrations
+COPY --from=build /app/backend/certs backend/certs
 COPY --from=build /app/frontend/dist frontend/dist
 USER node
 EXPOSE 3018

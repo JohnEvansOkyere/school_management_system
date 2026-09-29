@@ -40,35 +40,26 @@ Never put the `postgres` administrator URL on the API host. It is only used from
 5. Sign in as the platform admin, create the pilot school and its headteacher (share the temporary password privately). The headteacher creates staff and guardian accounts.
 6. Rotate the `postgres` password after step 3 and keep it out of `.env`.
 
-## 3b. Deploying on Vercel (chosen 2026-09-29)
+## 3b. Render (API + worker) and Vercel (web app) — chosen 2026-09-29
 
-Layout (`vercel.json`): the web app is the static build of `frontend/dist`; `api/index.js` wraps the same Nest API as one Vercel Function (`/api/v1/*`, `/healthz`, `/readyz`); `api/cron.js` replaces the always-on worker. `.vercelignore` keeps `outreach/`, `.local/`, `.env*` and docs out of uploads.
+How the pieces fit: the browser only ever talks to the Vercel domain. `vercel.json` serves the static web app and **proxies `/api/v1/*` to the Render API**, so the session cookie (`SameSite=Strict`) stays first-party. Do not call the Render URL directly from the browser.
 
-1. **Apply the hosted migrations first** (from your machine, with the temporary `DATABASE_MIGRATION_URL` in `.env`): `npm run db:migrate:supabase` (preview: must list 021–028 as pending), then `npm run db:migrate:supabase -- --apply`, then `npm run db:check:supabase`. Remove `DATABASE_MIGRATION_URL` from `.env` afterwards and rotate the `postgres` password.
-2. Create the project from the GitHub repo (Root Directory = repo root; the framework preset stays "Other"; `vercel.json` sets install/build/output).
-3. Environment variables (**Production only**, so previews never touch the hosted database):
+1. **Hosted migrations** (done 2026-09-29: ledger at 028). For later releases run the preview then `--apply` from your machine (section 3, step 2).
+2. **Render**: New → Blueprint → this repo (`render.yaml`). It creates `school-api` (web, Docker, health check `/healthz`) and `school-worker` (background worker, same image). Fill the prompted secrets:
+   - `DATABASE_URL`: `school_app` session-pooler URL with `?sslmode=verify-full&sslrootcert=bundled` (the Supabase CA ships in the image).
+   - `WORKER_DATABASE_URL`: the `school_worker` URL with the same options.
+   - `ALLOWED_ORIGINS`: `https://<your-vercel-domain>` (add your custom domain too, comma separated).
+   - `ALLOWED_HOSTS` is pre-set to `school-api.onrender.com`; change it if Render gave the service a different hostname.
+   - `MFA_REQUIRED=false` (pilot decision), `MFA_ENCRYPTION_KEY` (generated once by Render; keep it), `TRUST_PROXY=2` (Render's proxy plus Vercel's), `AUTH_MODE=password`.
+   Check `https://<render-host>/readyz` returns 200.
+3. **Vercel**: import the same repo (Root Directory = repo root, framework "Other"; `vercel.json` sets everything). Edit the destination in `vercel.json` if your Render hostname differs from `school-api.onrender.com`, then redeploy. No environment variables are needed on Vercel.
+4. Open the Vercel URL, sign in. If any request fails with "Host not allowed" or "Request origin was not accepted", the API is telling you which allow-list entry is missing (`ALLOWED_HOSTS` / `ALLOWED_ORIGINS`).
+5. Create the platform administrator once: `DATABASE_TARGET=supabase npm run platform-admin -w backend -- "Evans" you@example.com` (needs the admin URL from your machine; then remove it from `.env` and rotate the `postgres` password), sign in, create the pilot school and headteacher.
 
-| Variable | Value |
-| --- | --- |
-| `DATABASE_TARGET` | `supabase` |
-| `DATABASE_URL` | `school_app` session-pooler URL with `?sslmode=verify-full&sslrootcert=bundled` (the Supabase CA ships in `backend/certs`) |
-| `WORKER_DATABASE_URL` | `school_worker` URL, same TLS options (used only by the cron function) |
-| `DB_POOL_MAX` | `2` (each function instance keeps its own pool; raise only if Supabase connection limits allow) |
-| `AUTH_MODE` | `password` |
-| `MFA_REQUIRED` | `false` (pilot decision) |
-| `MFA_ENCRYPTION_KEY` | any long random string (the app refuses to start in production without it, even with MFA off) |
-| `TRUST_PROXY` | `1` |
-| `CRON_SECRET` | random string of at least 16 characters (Vercel sends it to `/api/cron`) |
-
-`ALLOWED_HOSTS`/`ALLOWED_ORIGINS` are not needed: on Vercel the deployment's own hostnames are trusted automatically. Add both when you attach a custom domain.
-4. Deploy, then check `https://<your-domain>/readyz` returns 200 (it reports database and migration ledger).
-5. Create the platform administrator with `DATABASE_TARGET=supabase npm run platform-admin -w backend -- "Evans" you@example.com` (needs the admin URL once more), sign in, create the pilot school and headteacher.
-
-Serverless limits to know about:
-- **Cron frequency depends on your Vercel plan.** `vercel.json` schedules `/api/cron` daily (`0 6 * * *`) because Hobby allows nothing more frequent. Audit exports and, later, queued SMS only move when it runs. On Pro change the schedule to `* * * * *`.
-- The login rate limiter is per function instance, so it slows guessing but does not cap it globally. Use long unique passwords, and move it into the database before growing beyond the pilot.
-- Functions are limited to 30 s (cron 60 s) and 4.5 MB request bodies; CSV imports (40 kB) and normal requests are well within that.
-- Cold starts add about a second to the first request after idle.
+Notes:
+- Use Render's paid (Starter) web service for the pilot: the free plan sleeps after 15 idle minutes and the first request then takes about a minute. The worker is only needed for audit exports and, later, SMS; you can leave it out at first.
+- The login rate limiter is in memory per API instance (fine with one instance): use long unique passwords, especially for the platform admin account.
+- The API also serves the web app itself at the Render URL; Vercel is the address you give schools.
 
 ## 4. Data protection gate (before any real learner record)
 

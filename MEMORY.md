@@ -141,3 +141,8 @@ Read MEMORY.md at the start of every session before doing anything. Never contra
 **What was decided:** Evans asked the assistant to run the hosted migration; it was previewed, then applied with the reviewed runner and verified (ledger complete, runtime role connects). The earlier attempt was blocked until Evans explicitly requested it.
 **Why:** The deployed code requires the schema (`/readyz` and startup checks refuse an older ledger).
 **What was rejected:** Applying without a preview, or leaving the administrator URL in `.env` after the platform-admin step.
+
+## 2026-09-29, Hosting: Render (API + worker) + Vercel (web app) — supersedes Vercel-only
+**What was decided:** Backend on Render from the existing Docker image (web service plus background worker), frontend on Vercel with `/api/v1/*` proxied to Render. The Vercel function/cron packaging was removed. DigitalOcean remains the later move.
+**Why:** Evans's preference; keeps the always-on worker (no cron limits) and the first-party cookie (`SameSite=Strict`) works because the browser only sees the Vercel domain.
+**What was rejected:** Calling the Render URL directly from the browser (cross-site cookie would not be sent), Vercel serverless functions plus a daily cron.

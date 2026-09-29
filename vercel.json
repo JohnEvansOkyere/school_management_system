@@ -1,19 +1,12 @@
 {
   "framework": null,
   "installCommand": "npm ci --ignore-scripts",
-  "buildCommand": "npm run build",
+  "buildCommand": "npm run build -w frontend",
   "outputDirectory": "frontend/dist",
-  "functions": {
-    "api/index.js": { "maxDuration": 30, "includeFiles": "backend/{dist,migrations,certs}/**" },
-    "api/cron.js": { "maxDuration": 60, "includeFiles": "backend/{dist,migrations,certs}/**" }
-  },
   "rewrites": [
-    { "source": "/api/v1/:path*", "destination": "/api/index" },
-    { "source": "/healthz", "destination": "/api/index" },
-    { "source": "/readyz", "destination": "/api/index" },
+    { "source": "/api/v1/:path*", "destination": "https://school-api.onrender.com/api/v1/:path*" },
     { "source": "/((?!api/).*)", "destination": "/index.html" }
   ],
-  "crons": [{ "path": "/api/cron", "schedule": "0 6 * * *" }],
   "headers": [
     { "source": "/assets/(.*)", "headers": [{ "key": "Cache-Control", "value": "public, max-age=31536000, immutable" }] },
     { "source": "/(.*)", "headers": [
