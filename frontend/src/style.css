@@ -2,3 +2,5 @@
 .learner-imports{min-width:0;overflow-wrap:anywhere}.learner-imports label,.learner-imports input,.learner-imports select,.learner-imports .actions>*{min-width:0;max-width:100%}
 .learner-collection{min-width:0;overflow-wrap:anywhere}.learner-collection label,.learner-collection input,.learner-collection select,.learner-collection .actions>*{min-width:0;max-width:100%}
 .credentials{border:2px solid #d39323;border-radius:10px;padding:16px;margin:16px 0;background:#fffaf0}.credentials code{font-size:18px;user-select:all}
+.print-sheet{display:none}.print-sheet table{width:100%;border-collapse:collapse}.print-sheet th,.print-sheet td{border:1px solid #333;padding:6px;text-align:left;height:28px}
+@media print{body *{visibility:hidden}.print-sheet,.print-sheet *{visibility:visible}.print-sheet{display:block;position:absolute;left:0;top:0;width:100%;background:#fff}}
