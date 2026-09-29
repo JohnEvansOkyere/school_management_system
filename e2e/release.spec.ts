@@ -4,13 +4,14 @@ import { readFile } from 'node:fs/promises';
 const {JobWorker}=require('../backend/dist/jobs/worker');
 const school='10000000-0000-4000-8000-000000000001';
 test.beforeEach(async({page})=>{await page.clock.setFixedTime(new Date('2026-09-28T10:00:00Z'));});
-async function signIn(page:Page,email='head@example.test') {
+async function signIn(page:Page,email='head@example.test',tab='') {
   await page.goto('/');await page.getByLabel('Email',{exact:true}).fill(email);await page.getByLabel('Password',{exact:true}).fill('Synthetic-only-2026!');await page.getByRole('button',{name:'Sign in',exact:true}).click();
   await expect(page.getByRole('button',{name:'Sign out',exact:true})).toBeVisible();await page.getByRole('combobox',{name:'School',exact:true}).selectOption(school);
   await expect(page.getByRole('heading',{name:'Adinkra Synthetic School',exact:true})).toBeVisible();
+  if(tab){await page.getByRole('navigation',{name:'Sections',exact:true}).getByRole('link',{name:tab,exact:true}).click();}
 }
 test('CSV import requires fresh review, commits selected learners and retains approval on reload',async({page})=>{
-  const errors:string[]=[];page.on('pageerror',error=>errors.push(error.message));await signIn(page);
+  const errors:string[]=[];page.on('pageerror',error=>errors.push(error.message));await signIn(page,'head@example.test','Learners');
   const suffix=randomUUID().slice(0,8),className=`CSV class ${suffix}`,fileName=`learners-${suffix}.csv`,reason='Reviewed synthetic source and distinct identities';
   const session=await (await page.request.get('/api/v1/auth/session')).json();
   async function post(route:string,body:Record<string,unknown>){const response=await page.request.post(`/api/v1/schools/${school}${route}`,{headers:{'x-csrf-token':session.csrfToken},data:{operationId:randomUUID(),...body}});expect(response.status(),await response.text()).toBe(201);return response.json();}
@@ -36,7 +37,7 @@ test('CSV import requires fresh review, commits selected learners and retains ap
   const learners=await (await page.request.get(`/api/v1/schools/${school}/learners?search=CSV-A-${suffix}`)).json();expect(learners.total).toBe(1);const detail=await (await page.request.get(`/api/v1/schools/${school}/learners/${learners.items[0].id}`)).json();expect(detail.enrolments).toHaveLength(1);expect(detail.enrolments[0].class_id).toBe(section.id);expect(errors).toEqual([]);
 });
 test('collection verifies pickup, records headteacher exceptions and preserves consumed authority after correction',async({page,browser})=>{
-  const errors:string[]=[];page.on('pageerror',error=>errors.push(error.message));await signIn(page);const suffix=randomUUID().slice(0,8),name=`Synthetic Collection Child ${suffix}`,number=`PICK-${suffix}`;
+  const errors:string[]=[];page.on('pageerror',error=>errors.push(error.message));await signIn(page,'head@example.test','Learners');const suffix=randomUUID().slice(0,8),name=`Synthetic Collection Child ${suffix}`,number=`PICK-${suffix}`;
   const session=await (await page.request.get('/api/v1/auth/session')).json();
   async function post(route:string,body:Record<string,unknown>){const response=await page.request.post(`/api/v1/schools/${school}${route}`,{headers:{'x-csrf-token':session.csrfToken},data:{operationId:randomUUID(),...body}});expect(response.status(),await response.text()).toBe(201);return response.json();}
   const roster=await (await page.request.get(`/api/v1/schools/${school}/collection/learners`)).json(),today=roster.date,previous=new Date(Date.parse(today)-86400000).toISOString().slice(0,10);
@@ -62,7 +63,7 @@ test('collection verifies pickup, records headteacher exceptions and preserves c
 test('admission decisions, enrolment, transfer and reload preserve history',async({page})=>{
   const errors:string[]=[];page.on('pageerror',error=>errors.push(error.message));
   const suffix=randomUUID().slice(0,8),yearName=`Browser year ${suffix}`,first=`Primary Blue ${suffix}`,second=`Primary Green ${suffix}`,name=`Synthetic Browser Learner ${suffix}`,admission=`WEB-${suffix}`;
-  await signIn(page);await page.getByRole('button',{name:'School setup: academic years and classes',exact:true}).click();
+  await signIn(page,'head@example.test','Learners');await page.getByRole('button',{name:'School setup: academic years and classes',exact:true}).click();
   await page.getByLabel('Year name',{exact:true}).fill(yearName);await page.getByLabel('Start date',{exact:true}).fill('2026-09-02');await page.getByLabel('End date (exclusive)',{exact:true}).fill('2027-08-01');await page.getByRole('button',{name:'Add academic year',exact:true}).click();await expect(page.getByRole('status').filter({hasText:'Academic year added.'})).toBeVisible();
   for(const className of [first,second]) {
     await page.getByLabel('Class name',{exact:true}).fill(className);await page.getByLabel('Capacity',{exact:true}).fill('5');await page.getByRole('combobox',{name:'Academic year',exact:true}).selectOption({label:yearName});
@@ -87,7 +88,7 @@ test('admission decisions, enrolment, transfer and reload preserve history',asyn
   await expect(page.getByText('No open enrolment. Previous learner and class records are retained.',{exact:true})).toBeVisible();await expect(page.getByRole('button',{name:'Withdraw learner',exact:true})).toHaveCount(0);expect(errors).toEqual([]);
 });
 test('authorized audit export is generated and downloaded with tenant-scoped records',async({page})=>{
-  await signIn(page);await page.getByRole('button',{name:'Export audit history',exact:true}).click();await page.getByRole('button',{name:'Prepare export',exact:true}).click();await expect(page.getByRole('button',{name:'Check export progress',exact:true})).toBeVisible();
+  await signIn(page,'head@example.test','School');await page.getByRole('button',{name:'Export audit history',exact:true}).click();await page.getByRole('button',{name:'Prepare export',exact:true}).click();await expect(page.getByRole('button',{name:'Check export progress',exact:true})).toBeVisible();
   const worker=new JobWorker();try{await worker.runOnce();}finally{await worker.close();}
   await page.getByRole('button',{name:'Check export progress',exact:true}).click();await expect(page.getByRole('button',{name:'Download audit JSON',exact:true})).toBeVisible();
   const downloadEvent=page.waitForEvent('download');await page.getByRole('button',{name:'Download audit JSON',exact:true}).click();const download=await downloadEvent;await download.saveAs('.local/browser-audit-export.json');
@@ -98,7 +99,7 @@ test('teacher browser exposes no admissions controls and server rejects direct a
   const denied=await page.request.get(`/api/v1/schools/${school}/admissions`);expect(denied.status()).toBe(403);
 });
 test('guardian verification, distinct rights and revocation persist across two browser sessions',async({page,browser})=>{
-  const errors:string[]=[];page.on('pageerror',error=>errors.push(error.message));await signIn(page);
+  const errors:string[]=[];page.on('pageerror',error=>errors.push(error.message));await signIn(page,'head@example.test','Learners');
   const suffix=randomUUID().slice(0,8),name=`Synthetic Guardian Child ${suffix}`,admission=`FAM-${suffix}`;
   const session=await (await page.request.get('/api/v1/auth/session')).json();
   async function post(route:string,body:Record<string,unknown>){const response=await page.request.post(`/api/v1/schools/${school}${route}`,{headers:{'x-csrf-token':session.csrfToken},data:{operationId:randomUUID(),...body}});expect(response.status(),await response.text()).toBe(201);return response.json();}
@@ -126,7 +127,7 @@ test('guardian verification, distinct rights and revocation persist across two b
   }finally{await context.close();}
 });
 test('dated teacher grant, fresh roster and revocation work across two browser sessions',async({page,browser})=>{
-  const errors:string[]=[];page.on('pageerror',error=>errors.push(error.message));await signIn(page);
+  const errors:string[]=[];page.on('pageerror',error=>errors.push(error.message));await signIn(page,'head@example.test','Learning');
   const suffix=randomUUID().slice(0,8),className=`Roster class ${suffix}`,name=`Synthetic Roster Learner ${suffix}`,lateName=`Synthetic Late Learner ${suffix}`;
   const today=new Date().toISOString().slice(0,10),day=(delta:number)=>new Date(Date.parse(`${today}T00:00:00Z`)+delta*86400000).toISOString().slice(0,10);
   const session=await (await page.request.get('/api/v1/auth/session')).json();
@@ -172,7 +173,7 @@ test('attendance screen records an open day, submits, locks and corrects a regis
 });
 
 test('Nursery report draft passes review, publishes and appears in the guardian portal',async({page,browser})=>{
-  const errors:string[]=[];page.on('pageerror',error=>errors.push(error.message));await signIn(page);
+  const errors:string[]=[];page.on('pageerror',error=>errors.push(error.message));await signIn(page,'head@example.test','Learning');
   const suffix=randomUUID().slice(0,8),today='2026-09-28',learnerName=`Synthetic KG Report Learner ${suffix}`,admission=`REP-${suffix}`;
   const session=await (await page.request.get('/api/v1/auth/session')).json();
   async function post(route:string,body:Record<string,unknown>){const response=await page.request.post(`/api/v1/schools/${school}${route}`,{headers:{'x-csrf-token':session.csrfToken},data:{operationId:randomUUID(),...body}});expect(response.status(),await response.text()).toBe(201);return response.json();}
@@ -191,7 +192,7 @@ test('Nursery report draft passes review, publishes and appears in the guardian 
 });
 test('connection and proxy failures show a plain-language retry message, not a parser error',async({page})=>{
   const errors:string[]=[];page.on('pageerror',error=>errors.push(error.message));
-  await signIn(page);
+  await signIn(page,'head@example.test','Learners');
   await page.route('**/api/v1/schools/*/academic-years*',route=>route.fulfill({status:502,contentType:'text/html',body:'<html><body>Bad gateway</body></html>'}));
   await page.reload();await page.getByRole('combobox',{name:'School',exact:true}).selectOption(school);
   const panel=page.getByRole('region',{name:'Admissions and learners'});
@@ -229,7 +230,7 @@ test('platform administrator creates a school; its headteacher signs in with the
 test('headteacher drafts and approves a notice; the linked guardian reads it',async({page,browser})=>{
   const {Pool}=require('pg');const path=require('node:path');
   const owner=new Pool({host:path.resolve(__dirname,'../.local/postgres/socket'),port:55438,database:process.env.LOCAL_DB_NAME??'school_saas_local',user:process.env.USER});
-  const errors:string[]=[];page.on('pageerror',error=>errors.push(error.message));await signIn(page);
+  const errors:string[]=[];page.on('pageerror',error=>errors.push(error.message));await signIn(page,'head@example.test','Notices');
   const suffix=randomUUID().slice(0,8),className=`Notice class ${suffix}`,title=`Trip notice ${suffix}`;
   const session=await (await page.request.get('/api/v1/auth/session')).json();
   async function post(route:string,body:Record<string,unknown>){const response=await page.request.post(`/api/v1/schools/${school}${route}`,{headers:{'x-csrf-token':session.csrfToken},data:{operationId:randomUUID(),...body}});expect(response.status()).toBe(201);return response.json();}
@@ -247,7 +248,36 @@ test('headteacher drafts and approves a notice; the linked guardian reads it',as
   await panel.locator('li').filter({hasText:title}).getByRole('button',{name:'Approve and send',exact:true}).click();
   await expect(panel.getByText('Approved for 1 guardian; 0 will also get an SMS.')).toBeVisible();
   await page.setViewportSize({width:375,height:812});expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);
-  const guardianPage=await browser.newPage();await guardianPage.clock.setFixedTime(new Date('2026-09-28T10:00:00Z'));await signIn(guardianPage,'guardian@example.test');
+  const guardianPage=await browser.newPage();await guardianPage.clock.setFixedTime(new Date('2026-09-28T10:00:00Z'));await signIn(guardianPage,'guardian@example.test','Notices');
   const mine=guardianPage.getByRole('region',{name:'Notices from the school',exact:true});await expect(mine.getByText(title)).toBeVisible();await expect(mine.getByText('Bring a packed lunch on Friday.')).toBeVisible();
   await guardianPage.close();expect(errors).toEqual([]);
+});
+test('an Excel-style class list with "Admission No." headers and DD/MM/YYYY dates stages once the date order is chosen',async({page})=>{
+  const errors:string[]=[];page.on('pageerror',error=>errors.push(error.message));await signIn(page,'head@example.test','Learners');
+  const suffix=randomUUID().slice(0,8),className=`Excel class ${suffix}`;
+  const session=await (await page.request.get('/api/v1/auth/session')).json();
+  async function post(route:string,body:Record<string,unknown>){const response=await page.request.post(`/api/v1/schools/${school}${route}`,{headers:{'x-csrf-token':session.csrfToken},data:{operationId:randomUUID(),...body}});expect(response.status()).toBe(201);return response.json();}
+  const year=await post('/academic-years',{name:`Excel year ${suffix}`,startDate:'2026-09-01',endDate:'2027-08-01'});await post('/classes',{name:className,level:'Primary',capacity:5,academicYearId:year.id});
+  await page.getByRole('button',{name:'Import existing learners',exact:true}).click();
+  await page.getByLabel('Search import classes',{exact:true}).fill(className);await page.getByRole('button',{name:'Search classes',exact:true}).first().click();
+  await page.getByRole('combobox',{name:'Target class',exact:true}).selectOption({index:1});
+  await page.getByLabel('CSV file',{exact:true}).setInputFiles({name:`excel-${suffix}.csv`,mimeType:'text/csv',buffer:Buffer.from(`Student Name,Gender,Admission No.,DOB\r\n"Mensah, Ama ${suffix}",F,EX-${suffix},03/04/2015\r\n`)});
+  const stage=page.getByRole('button',{name:'Stage CSV for validation',exact:true});await expect(stage).toBeDisabled();
+  const format=page.getByRole('combobox',{name:/How are dates written/});await expect(format).toBeVisible();await expect(format.locator('option',{hasText:'3 April 2015'})).toHaveCount(1);await expect(format.locator('option',{hasText:'4 March 2015'})).toHaveCount(1);
+  await format.selectOption('dmy');await expect(stage).toBeEnabled();await stage.click();
+  await expect(page.getByText(new RegExp(`EX-${suffix} · Born 2015-04-03`))).toBeVisible();expect(errors).toEqual([]);
+});
+test('each role lands on its own daily work; the section stays in the address across reload at phone width',async({page,browser})=>{
+  const errors:string[]=[];page.on('pageerror',error=>errors.push(error.message));await page.setViewportSize({width:375,height:812});
+  const links=async(p:Page)=>p.getByRole('navigation',{name:'Sections',exact:true}).getByRole('link').allInnerTexts();
+  await signIn(page);expect(await links(page)).toEqual(['Today','Learners','Learning','Fees','Notices','School']);
+  await expect(page.getByRole('link',{name:'Today',exact:true})).toHaveAttribute('aria-current','page');await expect(page.getByRole('region',{name:'Notices to guardians'})).toHaveCount(0);
+  await page.getByRole('link',{name:'Notices',exact:true}).click();await expect(page.getByRole('region',{name:'Notices to guardians'})).toBeVisible();
+  await page.reload();await page.getByRole('combobox',{name:'School',exact:true}).selectOption(school);await expect(page.getByRole('region',{name:'Notices to guardians'})).toBeVisible();
+  expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);
+  for(const [email,expected] of [['teacher@example.test',['Today','Learning']],['frontdesk@example.test',['Learners']],['guardian@example.test',['My children','Fees','Notices']]] as const){
+    const other=await browser.newPage();await other.setViewportSize({width:375,height:812});await other.clock.setFixedTime(new Date('2026-09-28T10:00:00Z'));await signIn(other,email);expect(await links(other)).toEqual(expected);
+    expect(await other.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);await other.close();
+  }
+  expect(errors).toEqual([]);
 });

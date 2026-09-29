@@ -1,24 +1,35 @@
-import React, { FormEvent, useEffect, useRef, useState } from 'react';
+import React, { FormEvent, Suspense, lazy, useEffect, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import './style.css';
 import { request } from './lib/api';
-import { AuditExport } from './modules/AuditExport';
-import { Admissions } from './modules/Admissions';
-import { Collection } from './modules/Collection';
-import { GuardianNotices, Notices } from './modules/Notices';
-import { Guardians } from './modules/Guardians';
-import { Teaching } from './modules/Teaching';
-import { Attendance } from './modules/Attendance';
-import { EarlyYears } from './modules/EarlyYears';
-import { EarlyYearsReports } from './modules/EarlyYearsReports';
-import { AttendanceFollowUp } from './modules/AttendanceFollowUp';
-import { Assessment, GuardianTerminalReports } from './modules/Assessment';
-import { Finance, GuardianStatement } from './modules/Finance';
-import { Promotion } from './modules/Promotion';
-import { AiSettings } from './modules/AiSettings';
 import { Mfa } from './modules/Mfa';
-import { Accounts } from './modules/Accounts';
 import { PlatformAdmin } from './modules/PlatformAdmin';
+const lazyModule=<T extends Record<string,React.ComponentType<any>>,K extends keyof T>(load:()=>Promise<T>,name:K)=>lazy(()=>load().then(m=>({default:m[name]})));
+const AuditExport=lazyModule(()=>import('./modules/AuditExport'),'AuditExport');
+const Admissions=lazyModule(()=>import('./modules/Admissions'),'Admissions');
+const Collection=lazyModule(()=>import('./modules/Collection'),'Collection');
+const GuardianNotices=lazyModule(()=>import('./modules/Notices'),'GuardianNotices');
+const Notices=lazyModule(()=>import('./modules/Notices'),'Notices');
+const Guardians=lazyModule(()=>import('./modules/Guardians'),'Guardians');
+const Teaching=lazyModule(()=>import('./modules/Teaching'),'Teaching');
+const Attendance=lazyModule(()=>import('./modules/Attendance'),'Attendance');
+const EarlyYears=lazyModule(()=>import('./modules/EarlyYears'),'EarlyYears');
+const EarlyYearsReports=lazyModule(()=>import('./modules/EarlyYearsReports'),'EarlyYearsReports');
+const AttendanceFollowUp=lazyModule(()=>import('./modules/AttendanceFollowUp'),'AttendanceFollowUp');
+const Assessment=lazyModule(()=>import('./modules/Assessment'),'Assessment');
+const GuardianTerminalReports=lazyModule(()=>import('./modules/Assessment'),'GuardianTerminalReports');
+const Finance=lazyModule(()=>import('./modules/Finance'),'Finance');
+const GuardianStatement=lazyModule(()=>import('./modules/Finance'),'GuardianStatement');
+const Promotion=lazyModule(()=>import('./modules/Promotion'),'Promotion');
+const AiSettings=lazyModule(()=>import('./modules/AiSettings'),'AiSettings');
+const Accounts=lazyModule(()=>import('./modules/Accounts'),'Accounts');
+const tabsByRole:Record<string,{id:string;label:string}[]>={
+  headteacher:[{id:'today',label:'Today'},{id:'learners',label:'Learners'},{id:'learning',label:'Learning'},{id:'fees',label:'Fees'},{id:'notices',label:'Notices'},{id:'school',label:'School'}],
+  teacher:[{id:'today',label:'Today'},{id:'learning',label:'Learning'}],
+  accountant:[{id:'fees',label:'Fees'}],
+  frontdesk:[{id:'learners',label:'Learners'}],
+  guardian:[{id:'children',label:'My children'},{id:'fees',label:'Fees'},{id:'notices',label:'Notices'}]
+};
 type School = {id:string;name:string;role:string;version:number};
 type Session = {displayName:string;csrfToken:string;schools:School[];platformAdmin:boolean;mustChangePassword:boolean;mfaRequired:boolean;mfaEnrolled:boolean;mfaVerified:boolean};
 type AuditPage = {items:Audit[];total:number};
@@ -36,6 +47,8 @@ function App() {
   const [busy,setBusy] = useState(false);
   const [teacherAccessRefresh,setTeacherAccessRefresh] = useState(0);
   const [loading,setLoading] = useState(true);
+  const [tab,setTab] = useState(()=>location.hash.replace(/^#\//,''));
+  useEffect(()=>{const change=()=>setTab(location.hash.replace(/^#\//,''));addEventListener('hashchange',change);return ()=>removeEventListener('hashchange',change);},[]);
   const selectionEpoch=useRef(0);
   async function selectSchool(id:string) {
     const epoch=++selectionEpoch.current;
@@ -94,6 +107,19 @@ function App() {
   if(!session)return <main className="login"><p className="eyebrow">School workspace · Local development</p><h1>Welcome back</h1><p>Use a synthetic staff account to open your school.</p><form onSubmit={signIn}><label>Email<input type="email" autoComplete="username" value={email} onChange={e=>setEmail(e.target.value)} required/></label><label>Password<input type="password" autoComplete="current-password" value={password} onChange={e=>setPassword(e.target.value)} required/></label><button disabled={busy}>{busy?'Signing in…':'Sign in'}</button></form><p role="status">{status}</p><p className="muted">Synthetic data only. Managed identity is pending provider selection.</p></main>;
   if(session.mustChangePassword)return <main className="login"><p className="eyebrow">School workspace</p><h1>Choose a new password</h1><p>Your account was created with a temporary password. Choose your own to continue (at least 12 characters).</p><form onSubmit={changePassword}><label>Temporary password<input type="password" autoComplete="current-password" value={password} onChange={e=>setPassword(e.target.value)} required/></label><label>New password<input type="password" autoComplete="new-password" minLength={12} value={newPassword} onChange={e=>setNewPassword(e.target.value)} required/></label><button disabled={busy}>{busy?'Saving…':'Save new password'}</button></form><p role="status">{status}</p></main>;
   if(session.mfaRequired&&!session.mfaVerified)return <Mfa csrfToken={session.csrfToken} enrolled={session.mfaEnrolled} onDone={restore} onSignOut={()=>void signOut()}/>;
-  return <><header><a href="/" className="brand">School workspace</a><span>{session.displayName}</span><button className="secondary" disabled={busy} onClick={signOut}>Sign out</button></header><main>{session.platformAdmin&&<PlatformAdmin csrfToken={session.csrfToken} onEnter={enterSchool}/>}<p className="eyebrow">Your school</p><label className="school-picker">School<select value={school?.id??''} disabled={busy} onChange={e=>{setBusy(true);selectSchool(e.target.value).catch(error=>setStatus(error.message)).finally(()=>setBusy(false));}}>{!school&&<option value="">Loading…</option>}{session.schools.map(s=><option key={s.id} value={s.id}>{s.name}</option>)}</select></label>{school&&<><h1>{school.name}</h1><p className="muted">Signed in as {school.role}. All records are scoped to this school.</p>{['headteacher','accountant'].includes(school.role)&&<Finance key={`finance:${school.id}`} schoolId={school.id} csrfToken={session.csrfToken} role={school.role}/>}{school.role==='guardian'&&<GuardianStatement key={`statement:${school.id}`} schoolId={school.id}/>}{school.role==='guardian'&&<GuardianTerminalReports key={`terminal:${school.id}`} schoolId={school.id}/>}{school.role==='headteacher'&&<Notices key={`notices:${school.id}`} schoolId={school.id} csrfToken={session.csrfToken}/>}{school.role==='guardian'&&<GuardianNotices key={`gnotices:${school.id}`} schoolId={school.id}/>}{school.role==='headteacher'&&<Promotion key={`promotion:${school.id}`} schoolId={school.id} csrfToken={session.csrfToken}/>}{school.role==='headteacher'&&<AiSettings key={`ai:${school.id}`} schoolId={school.id} csrfToken={session.csrfToken}/>}{school.role==='headteacher'&&<Accounts key={`accounts:${school.id}`} schoolId={school.id} csrfToken={session.csrfToken}/>}{['headteacher','frontdesk'].includes(school.role)&&<Admissions key={school.id} schoolId={school.id} csrfToken={session.csrfToken} role={school.role}/>} {["headteacher","frontdesk"].includes(school.role)&&<Collection key={'collection:'+school.id} schoolId={school.id} csrfToken={session.csrfToken} role={school.role}/>} {['headteacher','guardian'].includes(school.role)&&<Guardians key={`guardians:${school.id}`} schoolId={school.id} csrfToken={session.csrfToken} role={school.role}/>}{['headteacher','teacher'].includes(school.role)&&<Teaching key={`teaching:${school.id}`} schoolId={school.id} csrfToken={session.csrfToken} role={school.role} onAccessRefresh={()=>setTeacherAccessRefresh(value=>value+1)}/>} {school.role==='headteacher'&&<AttendanceFollowUp key={`followup:${school.id}`} schoolId={school.id}/>}{['headteacher','teacher'].includes(school.role)&&<Assessment key={`assessment:${school.id}`} schoolId={school.id} csrfToken={session.csrfToken} role={school.role}/>}{['headteacher','teacher'].includes(school.role)&&<Attendance key={`attendance:${school.id}`} schoolId={school.id} csrfToken={session.csrfToken} role={school.role} accessRefresh={teacherAccessRefresh}/>} {['headteacher','teacher'].includes(school.role)&&<EarlyYears key={`early-years:${school.id}:${school.role}`} schoolId={school.id} csrfToken={session.csrfToken} role={school.role}/>}{['headteacher','teacher','guardian'].includes(school.role)&&<EarlyYearsReports key={`early-years-reports:${school.id}:${school.role}`} schoolId={school.id} csrfToken={session.csrfToken} role={school.role}/>}<section><h2>School details</h2>{school.role==='headteacher'?<form onSubmit={save}><label>School name<input value={name} minLength={3} maxLength={120} onChange={e=>setName(e.target.value)} required/></label><div className="actions"><button disabled={busy||name===school.name}>{busy?'Saving…':'Save details'}</button><button className="secondary" type="button" disabled={busy} onClick={()=>selectSchool(school.id).catch(error=>setStatus(error.message))}>Reload details</button></div><p className="muted">{name!==school.name?'Unsaved changes':`Saved version ${school.version}`}</p></form>:<p>School details are maintained by the headteacher.</p>}<p role="status" aria-live="polite">{status}</p></section>{school.role==='headteacher'&&<section><h2>Recent changes</h2><AuditExport key={school.id} schoolId={school.id} csrfToken={session.csrfToken}/>{audit.length?<><ul className="history">{audit.map(item=><li key={item.id}><strong>{({"school.details.updated":"School details saved","audit.export.requested":"Audit export requested"} as Record<string,string>)[item.action]??item.action.replaceAll("."," ")}</strong><span>{item.metadata.version?`Version ${item.metadata.version} · `:""}{new Date(item.created_at).toLocaleString('en-GH',{timeZone:'Africa/Accra'})}</span></li>)}</ul>{audit.length<auditTotal&&<p>Showing {audit.length} of {auditTotal} changes. <button type="button" className="secondary" onClick={()=>void moreAudit()}>Show older changes</button></p>}</>:<p>No changes recorded yet.</p>}</section>}</>}{!school&&<p role="status">{status||'Select an available school to continue.'}</p>}<p className="muted">Local foundation build · Synthetic schools</p></main></>;
+  const schoolDetails=school&&<><section><h2>School details</h2>{school.role==='headteacher'?<form onSubmit={save}><label>School name<input value={name} minLength={3} maxLength={120} onChange={e=>setName(e.target.value)} required/></label><div className="actions"><button disabled={busy||name===school.name}>{busy?'Saving…':'Save details'}</button><button className="secondary" type="button" disabled={busy} onClick={()=>selectSchool(school.id).catch(error=>setStatus(error.message))}>Reload details</button></div><p className="muted">{name!==school.name?'Unsaved changes':`Saved version ${school.version}`}</p></form>:<p>School details are maintained by the headteacher.</p>}<p role="status" aria-live="polite">{status}</p></section></>;
+  const recentChanges=school&&<section><h2>Recent changes</h2><AuditExport key={school.id} schoolId={school.id} csrfToken={session.csrfToken}/>{audit.length?<><ul className="history">{audit.map(item=><li key={item.id}><strong>{({"school.details.updated":"School details saved","audit.export.requested":"Audit export requested"} as Record<string,string>)[item.action]??item.action.replaceAll("."," ")}</strong><span>{item.metadata.version?`Version ${item.metadata.version} · `:""}{new Date(item.created_at).toLocaleString('en-GH',{timeZone:'Africa/Accra'})}</span></li>)}</ul>{audit.length<auditTotal&&<p>Showing {audit.length} of {auditTotal} changes. <button type="button" className="secondary" onClick={()=>void moreAudit()}>Show older changes</button></p>}</>:<p>No changes recorded yet.</p>}</section>;
+  const sid=school?.id??'',csrf=session.csrfToken,role=school?.role??'';
+  const views:Record<string,()=>React.ReactNode>={
+    today:()=><>{role==='headteacher'&&<AttendanceFollowUp key={`followup:${sid}`} schoolId={sid}/>}<Attendance key={`attendance:${sid}`} schoolId={sid} csrfToken={csrf} role={role} accessRefresh={teacherAccessRefresh}/>{role==='teacher'&&<Teaching key={`teaching:${sid}`} schoolId={sid} csrfToken={csrf} role={role} onAccessRefresh={()=>setTeacherAccessRefresh(value=>value+1)}/>}</>,
+    learners:()=><>{['headteacher','frontdesk'].includes(role)&&<Admissions key={sid} schoolId={sid} csrfToken={csrf} role={role}/>}{['headteacher','frontdesk'].includes(role)&&<Collection key={'collection:'+sid} schoolId={sid} csrfToken={csrf} role={role}/>}{role==='headteacher'&&<Guardians key={`guardians:${sid}`} schoolId={sid} csrfToken={csrf} role={role}/>}{role==='headteacher'&&<Promotion key={`promotion:${sid}`} schoolId={sid} csrfToken={csrf}/>}</>,
+    learning:()=><>{role==='headteacher'&&<Teaching key={`teaching:${sid}`} schoolId={sid} csrfToken={csrf} role={role} onAccessRefresh={()=>setTeacherAccessRefresh(value=>value+1)}/>}<Assessment key={`assessment:${sid}`} schoolId={sid} csrfToken={csrf} role={role}/><EarlyYears key={`early-years:${sid}:${role}`} schoolId={sid} csrfToken={csrf} role={role}/><EarlyYearsReports key={`early-years-reports:${sid}:${role}`} schoolId={sid} csrfToken={csrf} role={role}/></>,
+    fees:()=>role==='guardian'?<GuardianStatement key={`statement:${sid}`} schoolId={sid}/>:<Finance key={`finance:${sid}`} schoolId={sid} csrfToken={csrf} role={role}/>,
+    notices:()=>role==='guardian'?<GuardianNotices key={`gnotices:${sid}`} schoolId={sid}/>:<Notices key={`notices:${sid}`} schoolId={sid} csrfToken={csrf}/>,
+    children:()=><><Guardians key={`guardians:${sid}`} schoolId={sid} csrfToken={csrf} role={role}/><EarlyYearsReports key={`early-years-reports:${sid}:${role}`} schoolId={sid} csrfToken={csrf} role={role}/><GuardianTerminalReports key={`terminal:${sid}`} schoolId={sid}/></>,
+    school:()=><><Accounts key={`accounts:${sid}`} schoolId={sid} csrfToken={csrf}/><AiSettings key={`ai:${sid}`} schoolId={sid} csrfToken={csrf}/>{schoolDetails}{recentChanges}</>,
+  };
+  const tabs=(tabsByRole[role]??[]),current=tabs.find(item=>item.id===tab)??tabs[0];
+  return <><header><a href="/" className="brand">School workspace</a><span>{session.displayName}</span><button className="secondary" disabled={busy} onClick={signOut}>Sign out</button></header><main>{session.platformAdmin&&<PlatformAdmin csrfToken={session.csrfToken} onEnter={enterSchool}/>}<p className="eyebrow">Your school</p><label className="school-picker">School<select value={school?.id??''} disabled={busy} onChange={e=>{setBusy(true);selectSchool(e.target.value).catch(error=>setStatus(error.message)).finally(()=>setBusy(false));}}>{!school&&<option value="">Loading…</option>}{session.schools.map(s=><option key={s.id} value={s.id}>{s.name}</option>)}</select></label>{school&&<><h1>{school.name}</h1><p className="muted">Signed in as {school.role}. All records are scoped to this school.</p><nav className="tabs" aria-label="Sections">{tabs.map(item=><a key={item.id} href={`#/${item.id}`} aria-current={item.id===current?.id?'page':undefined}>{item.label}</a>)}</nav><Suspense fallback={<p role="status">Loading…</p>}>{current&&views[current.id]()}</Suspense></>}{!school&&<p role="status">{status||'Select an available school to continue.'}</p>}<p className="muted">Local foundation build · Synthetic schools</p></main></>;
 }
 createRoot(document.getElementById('root')!).render(<React.StrictMode><App/></React.StrictMode>);

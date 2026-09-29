@@ -76,7 +76,8 @@ Severity: **P0** breaks, or blocks any real school use · **P1** must fix before
   - Partly done 2026-09-29: classes (year filter), academic years and audit view are paged; tests use 150 classes and 2,000 audit events. Audit export is still capped at 500 rows.
   - Fix: page these endpoints like learners/admissions; filter classes by academic year; stream audit exports by date range into a private file (CSV) instead of a 500-row JSON blob in `outbox_jobs.result`.
   - Verify: API tests with 150 classes and 2,000 audit events.
-- [ ] **CSV onboarding will reject typical Ghana school spreadsheets.** Exact header `admission_number,full_name,date_of_birth`, ISO dates only (`imports.service.ts` `validDate`), 200 rows / 40 kB / one class per batch, and no guardian columns. Excel in Ghana usually exports `DD/MM/YYYY` and headers like "Admission No.".
+- [~] **CSV onboarding will reject typical Ghana school spreadsheets.**
+  - Done 2026-09-29: header aliases (Admission No., Name, DOB…), any column order, extra columns ignored, comma/semicolon/tab, `DD/MM/YYYY` or `MM/DD/YYYY` with a required explicit choice showing how the first date reads. Still open: downloadable filled template in more formats, guardian-contact import (pending links), larger batches. Exact header `admission_number,full_name,date_of_birth`, ISO dates only (`imports.service.ts` `validDate`), 200 rows / 40 kB / one class per batch, and no guardian columns. Excel in Ghana usually exports `DD/MM/YYYY` and headers like "Admission No.".
   - Fix: accept a documented header alias list and `DD/MM/YYYY` with an explicit format picker and preview; offer a downloadable template; add a reviewed guardian-contact import that creates **pending** links (never auto-verified).
   - Verify: fixtures exported from Excel/Google Sheets with Ghana locale import cleanly; ambiguous dates (e.g. 03/04/2015) require explicit format choice.
 - [x] **Frontend crashes on non-JSON errors.** `frontend/src/lib/api.ts:3` calls `response.json()` unconditionally; a proxy 502/504 HTML page or network drop shows "Unexpected token <" and leaves no retry path.
@@ -95,7 +96,8 @@ Severity: **P0** breaks, or blocks any real school use · **P1** must fix before
   - Fix: add composite `(school_id, fk)` indexes for FKs used in joins or history screens; verify with `EXPLAIN` on the guardian portal, roster and report queries at 50-school synthetic volume.
 - [ ] **Worker throughput and leases.** One job per school per second, 30 s lease with no heartbeat, serial loop (`jobs/worker.ts`). Long exports will be retried while still running.
   - Fix: extend lease while working, process a small batch per cycle, expose queue-age metric.
-- [ ] **Single long page for all modules.** `frontend/src/main.tsx` mounts every permitted module for a headteacher at once, and each module fetches its data on mount (each call is a DB transaction). This is slow on 3G and hard to use.
+- [~] **Single long page for all modules.**
+  - Done 2026-09-29: role tabs (headteacher Today/Learners/Learning/Fees/Notices/School; teacher, accountant, front desk, guardian have their own), section kept in the URL hash, modules lazy-loaded (first-load JS 351→206 kB). Still open: a real router, Lighthouse check on throttled mobile, a head "needs attention" summary on Today. `frontend/src/main.tsx` mounts every permitted module for a headteacher at once, and each module fetches its data on mount (each call is a DB transaction). This is slow on 3G and hard to use.
   - Fix: add a router with role landing pages (teacher → today's register; head → incomplete registers/approvals; guardian → my children), lazy-load modules, keep school/period in the URL.
   - Verify: Lighthouse on a throttled "Slow 4G" Moto G profile; first usable screen < 3 s.
 - [ ] **Dense code style.** Services put many statements on single very long lines (99 lines over 400 characters). Reviews and diffs are hard and bugs hide.

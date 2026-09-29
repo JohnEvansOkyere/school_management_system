@@ -4,3 +4,4 @@
 .credentials{border:2px solid #d39323;border-radius:10px;padding:16px;margin:16px 0;background:#fffaf0}.credentials code{font-size:18px;user-select:all}
 .print-sheet{display:none}.print-sheet table{width:100%;border-collapse:collapse}.print-sheet th,.print-sheet td{border:1px solid #333;padding:6px;text-align:left;height:28px}
 @media print{body *{visibility:hidden}.print-sheet,.print-sheet *{visibility:visible}.print-sheet{display:block;position:absolute;left:0;top:0;width:100%;background:#fff}}
+.tabs{display:flex;gap:8px;overflow-x:auto;margin:20px 0 4px;padding-bottom:4px}.tabs a{white-space:nowrap;padding:10px 16px;border:1px solid #b6cac0;border-radius:999px;background:#fff;color:#235c4d;font-weight:650;text-decoration:none;min-height:44px;display:inline-flex;align-items:center}.tabs a[aria-current=page]{background:#176452;border-color:#176452;color:#fff}

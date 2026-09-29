@@ -17,7 +17,15 @@ type ImportBatch = {
 };
 type BatchSummary = Pick<ImportBatch, 'id' | 'status' | 'source_name' | 'class_name' | 'start_date' | 'row_count' | 'version'>;
 
-const CSV_HEADER = 'admission_number,full_name,date_of_birth';
+const CSV_HEADER = 'Admission No.,Full Name,Date of Birth';
+type DateFormat = '' | 'iso' | 'dmy' | 'mdy';
+// A date such as 03/04/2015 is ambiguous, so the school must say how to read it; ISO (2015-04-03) needs no choice.
+const looseDate = /(?<![\d/.-])(\d{1,2})[/.-](\d{1,2})[/.-](\d{4})(?![\d])/;
+function readAs(sample: RegExpExecArray, format: 'dmy' | 'mdy') {
+  const [, a, b, year] = sample; const day = format === 'dmy' ? a : b, month = format === 'dmy' ? b : a;
+  const months = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+  return `${Number(day)} ${months[Number(month) - 1] ?? '(invalid month)'} ${year}`;
+}
 
 export function LearnerImports({ schoolId, csrfToken, role, onCommitted }: Props) {
   const headteacher = role === 'headteacher';
@@ -32,6 +40,7 @@ export function LearnerImports({ schoolId, csrfToken, role, onCommitted }: Props
   const [startDate, setStartDate] = useState(new Date().toLocaleDateString('sv-SE', { timeZone: 'Africa/Accra' }));
   const [sourceName, setSourceName] = useState('');
   const [csv, setCsv] = useState('');
+  const [dateFormat, setDateFormat] = useState<DateFormat>('');
   const [batchRows, setBatchRows] = useState<BatchSummary[]>([]);
   const [batchSearchInput, setBatchSearchInput] = useState('');
   const [batchSearch, setBatchSearch] = useState('');
@@ -119,10 +128,9 @@ export function LearnerImports({ schoolId, csrfToken, role, onCommitted }: Props
       const text = await file.text();
       if (text.length > 40000) throw new Error('CSV files must be 40,000 characters or fewer.');
       const cleanText = text.replace(/^\uFEFF/, '');
-      const firstLine = cleanText.split(/\r?\n/, 1)[0]?.trim();
-      if (firstLine !== CSV_HEADER) throw new Error(`CSV header must be exactly: ${CSV_HEADER}`);
       const dataRows = cleanText.trimEnd().split(/\r?\n/).length - 1;
       if (dataRows < 1 || dataRows > 200) throw new Error('CSV must contain between 1 and 200 learner rows.');
+      setDateFormat(looseDate.test(cleanText) ? '' : 'iso');
       setCsv(cleanText); setSourceName(file.name);
       if (fileInput.current) fileInput.current.value = '';
     } catch (e) { setError((e as Error).message); }
@@ -130,8 +138,8 @@ export function LearnerImports({ schoolId, csrfToken, role, onCommitted }: Props
 
   async function stage(event: React.FormEvent) {
     event.preventDefault();
-    if (!classId || !startDate || !sourceName.trim() || !csv) return;
-    const payload = { sourceName: sourceName.trim(), classId, startDate, csv };
+    if (!classId || !startDate || !sourceName.trim() || !csv || !dateFormat) return;
+    const payload = { sourceName: sourceName.trim(), classId, startDate, csv, dateFormat: dateFormat || 'iso' };
     setBusy(true); setError(''); setNotice('');
     try {
       const key = 'learner-import:stage';
@@ -139,7 +147,7 @@ export function LearnerImports({ schoolId, csrfToken, role, onCommitted }: Props
       operations.current.delete(key);
       if (!alive.current) return;
       setBatch(result); setValidatedBatchId(''); setSelectedRows([]); setReviewReasons({}); setReviewConfirmed(false); setApprovalReason(''); setCapacityOverrideReason('');
-      setNotice('CSV staged. Validate it before reviewing rows for import.'); setCsv(''); setSourceName('');
+      setNotice('CSV staged. Validate it before reviewing rows for import.'); setCsv(''); setSourceName(''); setDateFormat('');
       setBatchOffset(0); await loadBatches(0, batchSearch);
     } catch (e) { if (alive.current) setError((e as Error).message); }
     finally { if (alive.current) setBusy(false); }
@@ -199,7 +207,7 @@ export function LearnerImports({ schoolId, csrfToken, role, onCommitted }: Props
     {open && <div>
       <p className="muted">Stage a CSV, validate identities, review duplicate matches, and approve selected rows. Imports create learners and dated class enrolments only; they do not merge identities or create logins or invoices.</p>
       <div className="actions"><button type="button" className="secondary" onClick={downloadTemplate}>Download CSV header template</button></div>
-      <p className="muted">Use the exact header <code>{CSV_HEADER}</code>. Date of birth may be blank; quote names that contain commas. Maximum 200 learner rows and 40,000 characters.</p>
+      <p className="muted">Save your class list from Excel or Google Sheets as CSV. The first row must name the columns, for example <code>{CSV_HEADER}</code> (other names such as “Name”, “Student ID” or “DOB” are recognised, column order does not matter and extra columns are ignored). Date of birth may be blank. Maximum 200 learner rows and 40,000 characters.</p>
       {error && <p role="alert">{error}</p>}{notice && <p role="status" aria-live="polite">{notice}</p>}
 
       <h3>Stage a learner CSV</h3>
@@ -213,7 +221,9 @@ export function LearnerImports({ schoolId, csrfToken, role, onCommitted }: Props
         <label>Enrolment start date<input type="date" value={startDate} onChange={event => setStartDate(event.target.value)} required /></label>
         <label>CSV file<input ref={fileInput} type="file" accept=".csv,text/csv" onChange={event => void readCsv(event.target.files?.[0])} required={!csv} /></label>
         {sourceName && <p className="muted">{sourceName} · {csv.length.toLocaleString()} characters</p>}
-        <button disabled={busy || classLoading || !classes.length || !csv}>{busy ? 'Working…' : 'Stage CSV for validation'}</button>
+        {csv && dateFormat !== 'iso' && (() => { const sample = looseDate.exec(csv)!; return <label>How are dates written in this file?<select value={dateFormat} onChange={event => setDateFormat(event.target.value as DateFormat)} required>
+          <option value="">Choose how to read {sample[0]}</option><option value="dmy">Day first: {sample[0]} is {readAs(sample, 'dmy')}</option><option value="mdy">Month first: {sample[0]} is {readAs(sample, 'mdy')}</option></select></label>; })()}
+        <button disabled={busy || classLoading || !classes.length || !csv || !dateFormat}>{busy ? 'Working…' : 'Stage CSV for validation'}</button>
       </form>
 
       <h3>Import history</h3>

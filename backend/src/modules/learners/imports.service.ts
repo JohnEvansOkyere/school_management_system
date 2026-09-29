@@ -39,7 +39,7 @@ export class LearnerImportsService {
     const results=new Map<number,Validation>();
     for(const row of rows){
       const input=row.input,issues:string[]=[];
-      if(input.columnCount!==3)issues.push('Expected exactly three CSV columns');
+      if(input.columnCount!==3)issues.push('This row has a different number of cells than the header row');
       if(!/^[A-Za-z0-9][A-Za-z0-9/-]{1,39}$/.test(input.admissionNumber))issues.push('Admission number must be 2–40 letters, digits, / or -');
       if(input.fullName.length<3||input.fullName.length>120||/[\x00-\x1f\x7f]/.test(input.fullName))issues.push('Learner name must be 3–120 characters without line breaks');
       if(input.dateOfBirth&&(!validDate(input.dateOfBirth)||input.dateOfBirth>=startDate))issues.push('Birth date must be a valid date before enrolment');
@@ -54,7 +54,7 @@ export class LearnerImportsService {
   }
   stage(client:PoolClient,actor:Actor,body:StageImportDto){return command(client,actor,body.operationId,'learner.import.stage',body,async()=>{
     await this.learners.lockIdentityCatalog(client,actor.schoolId);await this.learners.classForDate(client,actor.schoolId,body.classId,body.startDate);
-    const rows=parseLearnerCsv(body.csv),validation=await this.validations(client,actor.schoolId,body.startDate,rows),id=randomUUID();
+    const rows=parseLearnerCsv(body.csv,body.dateFormat??'iso'),validation=await this.validations(client,actor.schoolId,body.startDate,rows),id=randomUUID();
     const digest=createHash('sha256').update(body.csv).digest('hex');
     await client.query('INSERT INTO learner_import_batches(id,school_id,class_id,start_date,source_name,source_digest,row_count,created_by) VALUES($1,$2,$3,$4,$5,$6,$7,$8)',[id,actor.schoolId,body.classId,body.startDate,body.sourceName.trim(),digest,rows.length,actor.membershipId]);
     for(const row of rows)await client.query('INSERT INTO learner_import_rows(id,school_id,batch_id,row_number,input,validation) VALUES($1,$2,$3,$4,$5,$6)',[randomUUID(),actor.schoolId,id,row.rowNumber,JSON.stringify(row.input),JSON.stringify(validation.get(row.rowNumber))]);

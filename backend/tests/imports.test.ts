@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { Pool } from 'pg';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
-import { parseLearnerCsv } from '../src/modules/learners/imports.csv';
+import { normalizeDate,parseLearnerCsv } from '../src/modules/learners/imports.csv';
 const {createApp}=require('../dist/main');
 const connection={host:path.resolve(__dirname,'../../.local/postgres/socket'),port:55438,database:process.env.LOCAL_DB_NAME??'school_saas_local'};
 const owner=new Pool({...connection,user:process.env.USER}),runtime=new Pool({...connection,user:'school_app'});
@@ -27,6 +27,19 @@ after(async()=>{await app?.close();await owner.end();await runtime.end();});
 test('CSV parser preserves quoted identities and rejects malformed, empty and excessive input',()=>{
   assert.deepEqual(parseLearnerCsv('\uFEFF'+header.replace('\n','\r\n')+'I-01,"Synthetic, ""Learner""",2019-01-01\r\n')[0].input,{admissionNumber:'I-01',fullName:'Synthetic, "Learner"',dateOfBirth:'2019-01-01',columnCount:3});
   for(const csv of ['wrong,header\nX,Y',header,header+'X,"Unclosed,Y',header+'X,"Name"extra,Y',header+Array.from({length:201},(_,i)=>`N-${i},Synthetic learner,`).join('\n')])assert.throws(()=>parseLearnerCsv(csv));
+});
+test('Ghana school spreadsheets: header aliases, any column order, extra columns, semicolons and DD/MM/YYYY',()=>{
+  const excel='Name of Student,Gender,Admission No.,DOB\r\n"Mensah, Ama",F,GH-001,03/04/2015\r\nOwusu Kofi,M,GH-002,\r\n';
+  const rows=parseLearnerCsv(excel,'dmy');assert.deepEqual(rows.map(r=>r.input),[{admissionNumber:'GH-001',fullName:'Mensah, Ama',dateOfBirth:'2015-04-03',columnCount:3},{admissionNumber:'GH-002',fullName:'Owusu Kofi',dateOfBirth:'',columnCount:3}]);
+  assert.equal(parseLearnerCsv(excel,'mdy')[0].input.dateOfBirth,'2015-03-04');
+  assert.equal(parseLearnerCsv(excel,'iso')[0].input.dateOfBirth,'03/04/2015','without a chosen format the value is left for validation to reject');
+  assert.equal(parseLearnerCsv('Admission Number;Full Name;Date of Birth\nA-1;Ama Sample;5-1-2016\n','dmy')[0].input.dateOfBirth,'2016-01-05');
+  assert.equal(parseLearnerCsv('adm no\tlearner name\nA-1\tAma Sample\n')[0].input.dateOfBirth,'','date of birth column is optional');
+  assert.equal(parseLearnerCsv('admission_number,full_name\nA-1,Ama Sample,extra\n')[0].input.columnCount,0,'ragged rows are flagged by validation');
+  assert.throws(()=>parseLearnerCsv('Name,Full Name,Admission No.\nA,B,C\n'),/More than one column/);
+  assert.throws(()=>parseLearnerCsv('Class,Gender\nP1,F\n'),/admission number column/);
+  assert.equal(normalizeDate('31/02/2015','dmy'),'2015-02-31','impossible dates stay unreadable so the row is flagged');
+  assert.equal(normalizeDate('15/2015','dmy'),'15/2015');
 });
 test('staging is persisted and retry-safe without creating learners or enrolments',async()=>{
   const beforeLearners=await count('learners'),beforeEnrolments=await count('enrolments');
