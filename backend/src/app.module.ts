@@ -3,6 +3,7 @@ import { Database } from './core/database';
 import { Access } from './core/access';
 import { IdentityController } from './modules/identity/identity.controller';
 import { PlatformController } from './modules/platform/platform.controller';
+import { AccountsController } from './modules/staff/accounts.controller';
 import { TenancyController } from './modules/tenancy/tenancy.controller';
 import { ExportsController } from './modules/tenancy/exports.controller';
 import { LearnersController } from './modules/learners/learners.controller';
@@ -21,5 +22,5 @@ import { EarlyYearsController } from './modules/early-years/early-years.controll
 import { EarlyYearsService } from './modules/early-years/early-years.service';
 import { EarlyYearsReportsController } from './modules/early-years/reports.controller';
 import { EarlyYearsReportsService } from './modules/early-years/reports.service';
-@Module({controllers:[IdentityController,PlatformController,TenancyController,ExportsController,LearnersController,LearnerImportsController,CollectionController,GuardiansController,TeachingController,AttendanceController,EarlyYearsController,EarlyYearsReportsController],providers:[Database,Access,LearnersService,LearnerImportsService,CollectionService,GuardiansService,TeachingService,AttendanceService,EarlyYearsService,EarlyYearsReportsService]})
+@Module({controllers:[IdentityController,AccountsController,PlatformController,TenancyController,ExportsController,LearnersController,LearnerImportsController,CollectionController,GuardiansController,TeachingController,AttendanceController,EarlyYearsController,EarlyYearsReportsController],providers:[Database,Access,LearnersService,LearnerImportsService,CollectionService,GuardiansService,TeachingService,AttendanceService,EarlyYearsService,EarlyYearsReportsService]})
 export class AppModule {}
