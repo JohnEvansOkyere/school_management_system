@@ -136,3 +136,8 @@ Read MEMORY.md at the start of every session before doing anything. Never contra
 **What was decided:** Deploy the pilot on Vercel (static web app + one API function + daily cron for the job queue). Evans will move to DigitalOcean as the platform grows; the existing Dockerfile (API and worker as separate commands) is the migration path.
 **Why:** Fastest route to a live pilot with no server to manage; the daily cron limit (Hobby plan) only delays audit exports, and SMS is off.
 **What was rejected:** Making the cron frequent or the audit export synchronous now — not worth it for the pilot.
+
+## 2026-09-29, Hosted migrations 021–028 applied
+**What was decided:** Evans asked the assistant to run the hosted migration; it was previewed, then applied with the reviewed runner and verified (ledger complete, runtime role connects). The earlier attempt was blocked until Evans explicitly requested it.
+**Why:** The deployed code requires the schema (`/readyz` and startup checks refuse an older ledger).
+**What was rejected:** Applying without a preview, or leaving the administrator URL in `.env` after the platform-admin step.
