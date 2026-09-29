@@ -1,6 +1,6 @@
 # Deployment and pilot runbook
 
-Status: prepared and tested locally only. Nothing has been deployed; hosted migrations 021–027 are not applied. Every step below that touches hosted systems needs Evans's explicit approval at the time.
+Status: prepared and tested locally only. Nothing has been deployed; hosted migrations 021–028 are not applied. Every step below that touches hosted systems needs Evans's explicit approval at the time.
 
 ## 1. What is deployed
 
@@ -25,6 +25,8 @@ The API refuses to start in production if the database ledger is behind `backend
 | `AUTH_MODE=password` | Interim email + temporary-password sign-in (until managed auth / SMS OTP) |
 | `PORT`, `HOST`, `WEB_DIST` | Set by the image (`3018`, `0.0.0.0`, `/app/frontend/dist`) |
 | `MFA_ENCRYPTION_KEY` | Long random secret used to encrypt authenticator secrets (required in production; back it up — losing it forces MFA re-enrolment). `MFA_REQUIRED` defaults to on in production |
+| `MFA_REQUIRED=false` | Pilot decision (Evans, 2026-09-29): schools sign in with the temporary password they must change at first login; authenticator MFA and SMS OTP are configured later with each school. Note this also makes the platform administrator password-only, so use a long unique password for that account |
+| `SMS_SEND_ENABLED` | Leave **unset** for the pilot start: notices are approved and shown in the guardian app, and SMS deliveries are recorded as "SMS switched off". To enable later set `SMS_SEND_ENABLED=true`, `SMS_PROVIDERS=arkesel,moolre`, `SMS_SENDER_ID`, `ARKESEL_API_KEY`/`MOOLRE_API_KEY`, and test each adapter with a sandbox number first (they have not been run against a live provider) |
 | `AI_ENABLED` | Leave **unset** for the pilot start (AI off) |
 
 Never put the `postgres` administrator URL on the API host. It is only used from Evans's machine for `db:migrate:supabase` and `platform-admin`.
@@ -32,7 +34,7 @@ Never put the `postgres` administrator URL on the API host. It is only used from
 ## 3. First-time setup (each step needs approval)
 
 1. Choose the host: any container platform with HTTPS, a health check on `/healthz`, and a region close to Supabase `eu-central-1`. Put the site behind HTTPS only (HSTS is sent by the API).
-2. Review then apply migrations 021–027 with the runner (preview first): `npm run db:migrate:supabase`, then `-- --apply`. Verify `npm run db:check:supabase`.
+2. Review then apply migrations 021–028 with the runner (preview first): `npm run db:migrate:supabase`, then `-- --apply`. Verify `npm run db:check:supabase`.
 3. Create the platform administrator: `DATABASE_TARGET=supabase npm run platform-admin -w backend -- "Evans" you@example.com` (prints a one-time password; change it at first sign-in).
 4. Deploy API and worker with the variables above; confirm `/readyz` is 200 and the login page loads over HTTPS.
 5. Sign in as the platform admin, create the pilot school and its headteacher (share the temporary password privately). The headteacher creates staff and guardian accounts.
@@ -58,7 +60,8 @@ Never put the `postgres` administrator URL on the API host. It is only used from
 
 ## 7. Known limits for the pilot
 
-- Headteachers, accountants and platform admins use TOTP authenticator-app MFA; other roles sign in with a password only. SMS OTP (Arkesel/Moolre) is not built.
+- Pilot sign-in is email + temporary password with forced change for every role (`MFA_REQUIRED=false`). TOTP MFA is built and can be switched on per deployment; SMS OTP (Arkesel/Moolre) is not built. Payments (mobile money) are not integrated: fees are recorded by the accountant only.
+- Notices: headteacher-approved, in-app for every recipient; SMS is off until a provider is configured and tested.
 - One API instance (in-memory login rate limiter); no automatic scaling.
 - Terminal reports can be corrected only through a reasoned reopening and a new revision; payment reversals exist, fee waivers do not.
 - The Anthropic adapter is untested against the live API; AI stays off.
@@ -67,7 +70,7 @@ Never put the `postgres` administrator URL on the API host. It is only used from
 ## 8. Pilot go-live checklist
 
 - [ ] Data protection gate (section 4) complete
-- [ ] Migrations 021–027 applied and verified; `postgres` password rotated
+- [ ] Migrations 021–028 applied and verified; `postgres` password rotated
 - [ ] Staging or first deployment passes: sign-in, create school, year/classes, learners, attendance, assessment, fees, promotion (use the synthetic demo school first)
 - [ ] Backups enabled and a restore drill recorded
 - [ ] Headteacher trained (accounts, registers, follow-up, scores, fees); one week of dual running with paper registers

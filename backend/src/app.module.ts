@@ -6,6 +6,8 @@ import { PlatformController } from './modules/platform/platform.controller';
 import { AttendanceFollowUpController } from './modules/attendance/follow-up.controller';
 import { AssessmentController } from './modules/assessment/assessment.controller';
 import { AssessmentService } from './modules/assessment/assessment.service';
+import { NoticesController } from './modules/notices/notices.controller';
+import { NoticesService } from './modules/notices/notices.service';
 import { FinanceController } from './modules/finance/finance.controller';
 import { FinanceService } from './modules/finance/finance.service';
 import { PromotionsController } from './modules/learners/promotions.controller';
@@ -30,5 +32,5 @@ import { EarlyYearsController } from './modules/early-years/early-years.controll
 import { EarlyYearsService } from './modules/early-years/early-years.service';
 import { EarlyYearsReportsController } from './modules/early-years/reports.controller';
 import { EarlyYearsReportsService } from './modules/early-years/reports.service';
-@Module({controllers:[IdentityController,AiController,PromotionsController,FinanceController,AssessmentController,AttendanceFollowUpController,AccountsController,PlatformController,TenancyController,ExportsController,LearnersController,LearnerImportsController,CollectionController,GuardiansController,TeachingController,AttendanceController,EarlyYearsController,EarlyYearsReportsController],providers:[AiService,FinanceService,AssessmentService,Database,Access,LearnersService,LearnerImportsService,CollectionService,GuardiansService,TeachingService,AttendanceService,EarlyYearsService,EarlyYearsReportsService]})
+@Module({controllers:[NoticesController,IdentityController,AiController,PromotionsController,FinanceController,AssessmentController,AttendanceFollowUpController,AccountsController,PlatformController,TenancyController,ExportsController,LearnersController,LearnerImportsController,CollectionController,GuardiansController,TeachingController,AttendanceController,EarlyYearsController,EarlyYearsReportsController],providers:[NoticesService,AiService,FinanceService,AssessmentService,Database,Access,LearnersService,LearnerImportsService,CollectionService,GuardiansService,TeachingService,AttendanceService,EarlyYearsService,EarlyYearsReportsService]})
 export class AppModule {}

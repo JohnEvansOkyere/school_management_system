@@ -226,3 +226,28 @@ test('platform administrator creates a school; its headteacher signs in with the
     } finally {await context.close();}
   } finally {await owner.end();}
 });
+test('headteacher drafts and approves a notice; the linked guardian reads it',async({page,browser})=>{
+  const {Pool}=require('pg');const path=require('node:path');
+  const owner=new Pool({host:path.resolve(__dirname,'../.local/postgres/socket'),port:55438,database:process.env.LOCAL_DB_NAME??'school_saas_local',user:process.env.USER});
+  const errors:string[]=[];page.on('pageerror',error=>errors.push(error.message));await signIn(page);
+  const suffix=randomUUID().slice(0,8),className=`Notice class ${suffix}`,title=`Trip notice ${suffix}`;
+  const session=await (await page.request.get('/api/v1/auth/session')).json();
+  async function post(route:string,body:Record<string,unknown>){const response=await page.request.post(`/api/v1/schools/${school}${route}`,{headers:{'x-csrf-token':session.csrfToken},data:{operationId:randomUUID(),...body}});expect(response.status()).toBe(201);return response.json();}
+  const year=await post('/academic-years',{name:`Notice year ${suffix}`,startDate:'2026-09-01',endDate:'2027-08-01'}),section=await post('/classes',{name:className,level:'Primary',capacity:5,academicYearId:year.id});
+  const learner=randomUUID();
+  await owner.query("INSERT INTO learners(id,school_id,admission_number,full_name) VALUES($1,$2,$3,'Notice Learner')",[learner,school,`NT-${suffix}`]);
+  await owner.query("INSERT INTO enrolments(id,school_id,learner_id,class_id,start_date) VALUES($1,$2,$3,$4,'2026-09-01')",[randomUUID(),school,learner,section.id]);
+  await owner.query("INSERT INTO guardian_links(id,school_id,learner_id,guardian_membership_id,guardian_display_name,academic,billing,pickup,contact,verified_at,verified_by,verification_reason) VALUES($1,$2,$3,'30000000-0000-4000-8000-000000000004','Abena Sample',true,false,false,true,now(),'30000000-0000-4000-8000-000000000001','Checked in person')",[randomUUID(),school,learner]);
+  await owner.end();await page.reload();await page.getByRole('combobox',{name:'School',exact:true}).selectOption(school);
+  const panel=page.getByRole('region',{name:'Notices to guardians',exact:true});
+  await panel.getByLabel('Title',{exact:true}).fill(title);await panel.getByLabel('Message',{exact:true}).fill('Bring a packed lunch on Friday.');
+  const selects=panel.locator('form select');await selects.nth(0).selectOption('class');await selects.nth(1).selectOption(section.id);
+  await panel.getByRole('button',{name:'Save draft',exact:true}).click();await expect(panel.getByText('Saved as a draft. Nothing is sent until you approve it.')).toBeVisible();
+  page.once('dialog',dialog=>dialog.accept());
+  await panel.locator('li').filter({hasText:title}).getByRole('button',{name:'Approve and send',exact:true}).click();
+  await expect(panel.getByText('Approved for 1 guardian; 0 will also get an SMS.')).toBeVisible();
+  await page.setViewportSize({width:375,height:812});expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);
+  const guardianPage=await browser.newPage();await guardianPage.clock.setFixedTime(new Date('2026-09-28T10:00:00Z'));await signIn(guardianPage,'guardian@example.test');
+  const mine=guardianPage.getByRole('region',{name:'Notices from the school',exact:true});await expect(mine.getByText(title)).toBeVisible();await expect(mine.getByText('Bring a packed lunch on Friday.')).toBeVisible();
+  await guardianPage.close();expect(errors).toEqual([]);
+});

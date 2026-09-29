@@ -5,6 +5,8 @@ import { randomBytes } from 'node:crypto';
 import { PoolClient } from 'pg';
 import { Access, Actor } from '../../core/access';
 import { audit } from '../../core/commands';
+import { normalizeGhanaPhone } from '../notices/sms.provider';
+import { PhoneDto } from '../notices/notices.dto';
 import { hashPassword } from '../identity/identity.controller';
 
 class NewAccountDto {
@@ -34,7 +36,7 @@ export class AccountsController {
   }
   @Get()
   list(@Req() req: Request,@Param('schoolId',new ParseUUIDPipe()) schoolId: string) {
-    return this.run(req,schoolId,false,async client => ({items:(await client.query('SELECT user_id,membership_id,display_name,login,role,revoked_at,must_change_password FROM staff_list()')).rows}));
+    return this.run(req,schoolId,false,async client => ({items:(await client.query('SELECT user_id,membership_id,display_name,login,role,revoked_at,must_change_password,phone FROM staff_list()')).rows}));
   }
   @Post()
   create(@Req() req: Request,@Param('schoolId',new ParseUUIDPipe()) schoolId: string,@Body() body: NewAccountDto) {
@@ -52,6 +54,16 @@ export class AccountsController {
       await client.query('SELECT staff_reset_password($1,$2)',[userId,await hashPassword(password)]);
       await audit(client,actor,'account.password_reset',userId);
       return {temporaryPassword:password};
+    });
+  }
+  @Post(':userId/phone')
+  phone(@Req() req: Request,@Param('schoolId',new ParseUUIDPipe()) schoolId: string,@Param('userId',new ParseUUIDPipe()) userId: string,@Body() body: PhoneDto) {
+    const phone = body.phone.trim() === '' ? null : normalizeGhanaPhone(body.phone);
+    if (body.phone.trim() !== '' && !phone) throw new BadRequestException('Enter a Ghana mobile number such as 024 123 4567');
+    return this.run(req,schoolId,true,async (client,actor) => {
+      await client.query('SELECT staff_set_phone($1,$2)',[userId,phone]);
+      await audit(client,actor,'account.phone_set',userId,{cleared:phone === null});
+      return {phone};
     });
   }
   @Post(':userId/revoke')

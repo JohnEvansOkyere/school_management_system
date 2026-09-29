@@ -1,6 +1,7 @@
 import { Pool, PoolClient } from 'pg';
 import { randomUUID } from 'node:crypto';
 import { workerDatabaseConfig } from '../core/database';
+import { NoticeSender } from './notice-sender';
 
 export class JobWorker {
   readonly pool = new Pool(workerDatabaseConfig());
@@ -47,7 +48,7 @@ export class JobWorker {
   async close(){await this.pool.end();}
 }
 if(require.main===module) {
-  const worker=new JobWorker();let stopping=false;
+  const worker=new JobWorker(),notices=new NoticeSender();let stopping=false;
   const stop=()=>{stopping=true;};process.on('SIGTERM',stop);process.on('SIGINT',stop);
-  (async()=>{while(!stopping){try{await worker.runOnce();}catch{console.error('Worker cycle failed');}await new Promise(resolve=>setTimeout(resolve,1000));}await worker.close();})().catch(()=>{process.exitCode=1;});
+  (async()=>{while(!stopping){try{await worker.runOnce();await notices.runOnce();}catch{console.error('Worker cycle failed');}await new Promise(resolve=>setTimeout(resolve,1000));}await worker.close();await notices.close();})().catch(()=>{process.exitCode=1;});
 }

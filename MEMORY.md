@@ -126,3 +126,8 @@ Read MEMORY.md at the start of every session before doing anything. Never contra
 **What was decided:** AI drafts only, behind a provider seam (Anthropic adapter + deterministic template fallback), off by default at platform and school level, minimised/de-identified inputs, validated JSON outputs with citations, append-only run log without prompts or generated text, template fallback for every failure. First feature is Nursery/KG report remarks; further features are listed in docs/AI_DESIGN.md.
 **Why:** Keeps human approval and school isolation intact, gives value without risking child data, and works when AI is unavailable.
 **What was rejected:** Free-form chat over child data, storing prompts, automatic provider fallback, letting models compute grades or fees.
+
+## 2026-09-29, Pilot sign-in is password-only; payments and stronger auth deferred
+**What was decided:** Evans creates pilot school accounts in the admin dashboard and works with schools while they use the platform. Users sign in with the temporary password and must change it; no payment integration and no MFA/SMS OTP for the pilot (`MFA_REQUIRED=false`, `AUTH_MODE=password`). Notices are in-app first; SMS stays off until a provider is configured and tested (deliveries recorded as suppressed, sent at most once, never auto-retried).
+**Why:** Evans will configure payment and authentication per school later, with schools present; blocking the pilot on those adds no value now.
+**What was rejected:** Blocking the pilot on MFA/SMS OTP or mobile-money gateway. Risk accepted: the platform admin (cross-school access) is password-only under a global MFA switch, so that account needs a long unique password.

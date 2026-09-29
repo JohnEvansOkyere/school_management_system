@@ -1,7 +1,7 @@
 import React, { FormEvent, useCallback, useEffect, useState } from 'react';
 import { request } from '../lib/api';
 
-type Account = { user_id: string; display_name: string; login: string; role: string; revoked_at: string | null; must_change_password: boolean };
+type Account = { user_id: string; display_name: string; login: string; role: string; revoked_at: string | null; must_change_password: boolean; phone: string | null };
 type Credentials = { label: string; email: string; temporaryPassword: string };
 const roles = ['teacher', 'frontdesk', 'accountant', 'guardian'];
 
@@ -30,6 +30,7 @@ export function Accounts({ schoolId, csrfToken }: { schoolId: string; csrfToken:
     const result = await request<{ temporaryPassword: string }>(`/schools/${schoolId}/accounts/${account.user_id}/reset-password`, { method: 'POST', headers, body: '{}' });
     setCredentials({ label: `New password for ${account.display_name}`, email: account.login, temporaryPassword: result.temporaryPassword });
   });
+  const setPhone = (account: Account) => { const value = window.prompt(`Mobile number for ${account.display_name} (for SMS notices). Leave empty to remove.`, account.phone ?? ''); if (value !== null) void act(async () => { await request(`/schools/${schoolId}/accounts/${account.user_id}/phone`, { method: 'POST', headers, body: JSON.stringify({ phone: value }) }); }); };
   const revoke = (account: Account) => { if (window.confirm(`Remove ${account.display_name}'s access to this school?`)) void act(async () => { await request(`/schools/${schoolId}/accounts/${account.user_id}/revoke`, { method: 'POST', headers, body: '{}' }); }); };
 
   return <section aria-label="Staff and family accounts">
@@ -43,7 +44,7 @@ export function Accounts({ schoolId, csrfToken }: { schoolId: string; csrfToken:
       <label>Role<select value={form.role} onChange={e => setForm({ ...form, role: e.target.value })}>{roles.map(r => <option key={r} value={r}>{r}</option>)}</select></label>
       <button disabled={busy}>Create account</button>
     </form>
-    <ul className="history">{accounts.map(a => <li key={a.user_id}><strong>{a.display_name} · {a.role}</strong><span>{a.login}{a.revoked_at ? ' · access removed' : a.must_change_password ? ' · has not chosen a password yet' : ''}</span>
-      {!a.revoked_at && a.role !== 'headteacher' && <div className="actions"><button type="button" className="secondary" disabled={busy} onClick={() => reset(a)}>Reset password</button><button type="button" className="secondary" disabled={busy} onClick={() => revoke(a)}>Remove access</button></div>}</li>)}</ul>
+    <ul className="history">{accounts.map(a => <li key={a.user_id}><strong>{a.display_name} · {a.role}</strong><span>{a.login}{a.phone ? ` · ${a.phone}` : ''}{a.revoked_at ? ' · access removed' : a.must_change_password ? ' · has not chosen a password yet' : ''}</span>
+      {!a.revoked_at && a.role !== 'headteacher' && <div className="actions"><button type="button" className="secondary" disabled={busy} onClick={() => reset(a)}>Reset password</button><button type="button" className="secondary" disabled={busy} onClick={() => setPhone(a)}>Phone number</button><button type="button" className="secondary" disabled={busy} onClick={() => revoke(a)}>Remove access</button></div>}</li>)}</ul>
   </section>;
 }
