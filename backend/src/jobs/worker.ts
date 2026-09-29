@@ -45,10 +45,16 @@ export class JobWorker {
     const schools=(await this.pool.query('SELECT school_id FROM pending_job_schools()')).rows;
     for(const school of schools){const job=await this.claim(school.school_id);if(job)await this.execute(job);}
   }
+  private lastPurge=0;
+  // Hourly housekeeping: expired sessions and old retry receipts (never audit history). Returns null when not yet due.
+  async purgeIfDue(now=Date.now()) {
+    if(now-this.lastPurge<3_600_000)return null;this.lastPurge=now;
+    return (await this.pool.query('SELECT sessions_deleted::int,receipts_deleted::int FROM purge_expired()')).rows[0];
+  }
   async close(){await this.pool.end();}
 }
 if(require.main===module) {
   const worker=new JobWorker(),notices=new NoticeSender();let stopping=false;
   const stop=()=>{stopping=true;};process.on('SIGTERM',stop);process.on('SIGINT',stop);
-  (async()=>{while(!stopping){try{await worker.runOnce();await notices.runOnce();}catch{console.error('Worker cycle failed');}await new Promise(resolve=>setTimeout(resolve,1000));}await worker.close();await notices.close();})().catch(()=>{process.exitCode=1;});
+  (async()=>{while(!stopping){try{await worker.runOnce();await notices.runOnce();const purged=await worker.purgeIfDue();if(purged&&(purged.sessions_deleted||purged.receipts_deleted))console.log(JSON.stringify({purged}));}catch{console.error('Worker cycle failed');}await new Promise(resolve=>setTimeout(resolve,1000));}await worker.close();await notices.close();})().catch(()=>{process.exitCode=1;});
 }

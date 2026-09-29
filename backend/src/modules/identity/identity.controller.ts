@@ -20,6 +20,19 @@ class LoginDto {
   @IsEmail() @MaxLength(200) email!: string;
   @IsString() @MinLength(1) @MaxLength(200) password!: string;
 }
+// Failed sign-ins per account (attempted email, known or not): 10 failures lock that email for 15 minutes on this instance.
+const failures = new Map<string,{count:number;until:number}>();
+const lockAfter = 10, lockWindow = 15 * 60_000;
+function throttled(email: string, now = Date.now()) {
+  for (const [key,value] of failures) if (value.until < now) failures.delete(key);
+  const entry = failures.get(email);
+  return Boolean(entry && entry.count >= lockAfter);
+}
+function failed(email: string, now = Date.now()) {
+  if (failures.size > 10_000) failures.clear();
+  const entry = failures.get(email) ?? { count: 0, until: now + lockWindow };
+  entry.count++; failures.set(email, entry);
+}
 @Controller('api/v1/auth')
 export class IdentityController {
   constructor(private readonly db: Database, private readonly access: Access) {}
@@ -27,9 +40,13 @@ export class IdentityController {
   async login(@Body() body: LoginDto, @Req() req: Request, @Res({passthrough:true}) res: Response) {
     const syntheticLocal = process.env.DEV_AUTH === 'synthetic-local' && ['127.0.0.1','::1','::ffff:127.0.0.1'].includes(req.socket.remoteAddress ?? '');
     if (!syntheticLocal && process.env.AUTH_MODE !== 'password') throw new ForbiddenException('Synthetic identity is disabled');
-    const identity = await this.db.pool.query('SELECT id,password_hash FROM users WHERE synthetic_login=$1',[body.email]);
+    // Phones capitalise the first letter and people add spaces; accounts are stored lower-case.
+    const email = body.email.trim().toLowerCase();
+    if (throttled(email)) throw new HttpException('Too many failed sign-ins for this account. Try again in 15 minutes or ask your school administrator to reset the password.',429);
+    const identity = await this.db.pool.query('SELECT id,password_hash FROM users WHERE synthetic_login=$1',[email]);
     const [salt,hash] = identity.rows[0]?.password_hash.split(':') ?? ['missing', '00'.repeat(64)];
-    if (!timingSafeEqual(await scryptAsync(body.password,salt,64),Buffer.from(hash,'hex')) || !identity.rowCount) throw new UnauthorizedException('Sign-in details were not accepted');
+    if (!timingSafeEqual(await scryptAsync(body.password,salt,64),Buffer.from(hash,'hex')) || !identity.rowCount) { failed(email); throw new UnauthorizedException('Sign-in details were not accepted'); }
+    failures.delete(email);
     const token = randomBytes(32).toString('hex'); const csrf = randomBytes(32).toString('hex');
     await this.db.transaction(async client => {
       if (sessionToken(req)) await client.query('UPDATE sessions SET revoked_at=now() WHERE token_hash=$1',[digest(sessionToken(req))]);

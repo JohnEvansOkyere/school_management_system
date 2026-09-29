@@ -61,7 +61,8 @@ Severity: **P0** breaks, or blocks any real school use · **P1** must fix before
   - Partly done 2026-09-29: structured JSON request logs, `/healthz`, `/readyz` (DB + ledger via migration 020 function). Still open: worker heartbeat/queue age, error alerting.
   - Fix: structured request logs (request ID, route, status, duration, school ID — no child data), `/healthz` and `/readyz` (DB + migration ledger), worker heartbeat and queue-age metric, error alerting (e.g. Sentry with PII scrubbing).
   - Verify: an induced 500 and a stalled worker both raise an alert.
-- [ ] **Login rate limiter is not deployable.** In-memory per-IP map (`main.ts:20`): behind a proxy every user shares one IP bucket (30 attempts/min for the whole school), it resets on restart, and doesn't work across instances. `scryptSync` (`identity.controller.ts:19`) blocks the event loop per attempt.
+- [~] **Login rate limiter is not deployable.** In-memory per-IP map (`main.ts:20`): behind a proxy every user shares one IP bucket (30 attempts/min for the whole school), it resets on restart, and doesn't work across instances. `scryptSync` (`identity.controller.ts:19`) blocks the event loop per attempt.
+  - 2026-09-29: async scrypt was already in place; added a per-account lock (10 failures → 15 min) and case-insensitive email. The per-address limit is still in memory per instance: fine for one Render instance, move it into the database before scaling out.
   - Fix: rate-limit by account + client IP in PostgreSQL or Redis; use async `scrypt`; this largely goes away with managed identity.
   - Verify: load test 50 concurrent logins; p95 of other endpoints unaffected.
 - [x] **Local DB script picks the wrong PostgreSQL.** `scripts/local-db.sh:5` uses `pg_config --bindir`; on this machine that resolves to Anaconda, which has no `pg_ctl`, so `npm run db:start` fails.
@@ -90,11 +91,14 @@ Severity: **P0** breaks, or blocks any real school use · **P1** must fix before
 
 ### P2 — will hurt at scale or over time
 
-- [ ] **Unbounded table growth.** Expired sessions and old command receipts are never purged.
+- [x] **Unbounded table growth.** Expired sessions and old command receipts are never purged.
+  - Done 2026-09-29 (migration 029 + worker): hourly purge of sessions expired/revoked >30 days and receipts >30 days via a narrow definer function; audit history is never deleted.
   - Fix: worker job that deletes sessions >30 days past expiry and receipts older than the retry window (e.g. 30 days); needs a narrow DELETE grant to `school_worker` only.
-- [ ] **55 of 87 foreign keys lack an index.** Fine at one school; becomes join/lock cost across many tenants.
+- [x] **55 of 87 foreign keys lack an index.** Fine at one school; becomes join/lock cost across many tenants.
+  - Done 2026-09-29 (migration 029): every foreign key now has a leading index; test asserts none are missing.
   - Fix: add composite `(school_id, fk)` indexes for FKs used in joins or history screens; verify with `EXPLAIN` on the guardian portal, roster and report queries at 50-school synthetic volume.
-- [ ] **Worker throughput and leases.** One job per school per second, 30 s lease with no heartbeat, serial loop (`jobs/worker.ts`). Long exports will be retried while still running.
+- [~] **Worker throughput and leases.** One job per school per second, 30 s lease with no heartbeat, serial loop (`jobs/worker.ts`). Long exports will be retried while still running.
+  - Reviewed 2026-09-29: a running job holds a row lock and claims use SKIP LOCKED, so a lease heartbeat adds nothing; throughput is fine for pilot volumes. Still open: queue-age metric.
   - Fix: extend lease while working, process a small batch per cycle, expose queue-age metric.
 - [~] **Single long page for all modules.**
   - Done 2026-09-29: role tabs (headteacher Today/Learners/Learning/Fees/Notices/School; teacher, accountant, front desk, guardian have their own), section kept in the URL hash, modules lazy-loaded (first-load JS 351→206 kB). Still open: a real router, Lighthouse check on throttled mobile, a head "needs attention" summary on Today. `frontend/src/main.tsx` mounts every permitted module for a headteacher at once, and each module fetches its data on mount (each call is a DB transaction). This is slow on 3G and hard to use.
@@ -104,21 +108,29 @@ Severity: **P0** breaks, or blocks any real school use · **P1** must fix before
   - Fix: add Prettier + ESLint (typescript-eslint, `no-floating-promises`) in CI; format in one dedicated commit so history stays readable.
 - [ ] **No frontend unit tests, coverage or automated accessibility checks.**
   - Fix: Vitest + Testing Library for module state logic; `@axe-core/playwright` in the existing browser suite at 375 px.
-- [ ] **Dates computed in two places.** Most "Ghana today" logic uses PostgreSQL `Africa/Accra`; `early-years.service.ts:57` uses Node's clock. Clock skew between app host and DB can disagree near midnight.
+- [~] **Dates computed in two places.** Most "Ghana today" logic uses PostgreSQL `Africa/Accra`; `early-years.service.ts:57` uses Node's clock. Clock skew between app host and DB can disagree near midnight.
+  - Reviewed 2026-09-29: the Node path also uses Africa/Accra; only clock skew could differ. Accepted for the pilot.
   - Fix: take "today" from the database in the same transaction everywhere.
 - [ ] **Connection pool of 5** per process with every request in a transaction and row locks. Morning register submission is the peak.
   - Fix: make pool size configurable; load test 30 teachers submitting registers at once against the Supabase session pooler.
 
 ### P3 — edtech/product gaps against the plan (PRODUCT.md §2–3, DOMAIN_RULES)
 
-- [ ] **Attendance follow-up loop missing.** No missing-register tracking for heads, no repeated-absence follow-up tasks, no absence notices. Attendance currently records but does not yet drive action, which is where the educational value is.
-- [ ] **Printable contingency register** (PRODUCT.md §3) is not built; no print stylesheet exists. Ghana schools need this for power/network outages.
+- [x] **Attendance follow-up loop missing.** No missing-register tracking for heads, no repeated-absence follow-up tasks, no absence notices. Attendance currently records but does not yet drive action, which is where the educational value is.
+  - Built 2026-09-29 (follow-up screen, outstanding registers, repeated absence); absence notices to guardians go through notices.
+- [x] **Printable contingency register** (PRODUCT.md §3) is not built; no print stylesheet exists. Ghana schools need this for power/network outages.
+  - Built 2026-09-29.
 - [ ] **Offline tolerance.** Full offline is deferred correctly, but add a minimal "unsaved changes kept in memory + retry" state for registers and a service worker for the app shell only (no child data in storage).
-- [ ] **Promotion / end-of-year roll-over** is not built; without it the second academic year requires manual re-enrolment of every learner.
-- [ ] **Accountant role has no UI or endpoints.** Fees, receipts and reconciliation (P3) are the most-requested features in Ghana private schools and the likely purchase driver.
-- [ ] **Family channel.** No SMS/WhatsApp notice path; most guardians will not log into a web portal. Plan approved notices with delivery status via a Ghana SMS provider sandbox first.
-- [ ] **Primary/JHS learning workflows** (subjects, continuous assessment + exam weighting, terminal reports, BECE-oriented JHS records) are not started; the product currently serves Nursery/KG reporting only.
-- [ ] **AI features** (staff lesson/progress drafts) are not started. Build the evaluation harness (factual grounding, cross-school/child access, cost) before the first prompt, per ARCHITECTURE §5.
+- [x] **Promotion / end-of-year roll-over** is not built; without it the second academic year requires manual re-enrolment of every learner.
+  - Built 2026-09-29.
+- [x] **Accountant role has no UI or endpoints.** Fees, receipts and reconciliation (P3) are the most-requested features in Ghana private schools and the likely purchase driver.
+  - Built 2026-09-29 (fees, receipts, reversals, statements); reconciliation and mobile-money not built.
+- [x] **Family channel.** No SMS/WhatsApp notice path; most guardians will not log into a web portal. Plan approved notices with delivery status via a Ghana SMS provider sandbox first.
+  - Built 2026-09-29: head-approved notices, in-app plus SMS behind a provider seam (adapters untested against live providers; off).
+- [x] **Primary/JHS learning workflows** (subjects, continuous assessment + exam weighting, terminal reports, BECE-oriented JHS records) are not started; the product currently serves Nursery/KG reporting only.
+  - Built 2026-09-29 (subjects, weighting, terminal reports with corrections); BECE-specific records not built.
+- [x] **AI features** (staff lesson/progress drafts) are not started. Build the evaluation harness (factual grounding, cross-school/child access, cost) before the first prompt, per ARCHITECTURE §5.
+  - Built 2026-09-29: governed Nursery/KG report drafting, off by default.
 - [ ] **Outreach vs. product readiness.** 500 schools are being invited while the app cannot yet run outside localhost. Make sure demo meetings use the separate demo and promise only dated milestones.
 
 ## 4. Suggested order

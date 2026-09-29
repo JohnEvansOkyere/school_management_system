@@ -120,7 +120,9 @@ test('guardians read only notices delivered to them',async()=>{
 });
 
 test('staff phone numbers are normalised, audited and shown to the headteacher',async()=>{
-  const user='20000000-0000-4000-8000-000000000002';
+  const user=randomUUID();
+  await owner.query("INSERT INTO users(id,display_name,synthetic_login,password_hash) VALUES($1,'Phone Teacher',$2,'x')",[user,`phone-${user}@example.test`]);
+  await owner.query("INSERT INTO memberships(id,school_id,user_id,role) VALUES($1,$2,$3,'teacher')",[randomUUID(),school,user]);
   assert.equal((await call(`/accounts/${user}/phone`,'POST',{phone:'not a number'})).status,400);
   const r=await call(`/accounts/${user}/phone`,'POST',{phone:'024 555 0100'});assert.equal(r.status,201,JSON.stringify(r.body));assert.equal(r.body.phone,'+233245550100');
   assert.equal((await call('/accounts')).body.items.find((a:any)=>a.user_id===user).phone,'+233245550100');

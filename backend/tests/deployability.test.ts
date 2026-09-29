@@ -60,10 +60,11 @@ test('configured hosts and https origins are accepted; unknown ones stay denied'
 test('trust proxy comes from config and the login limiter keys on the client address',async()=>{
   const {app,port}=await start({TRUST_PROXY:'1'});
   assert.equal(app.getHttpAdapter().getInstance().get('trust proxy'),1);
-  const bad={email:'nobody@example.test',password:'wrong-password-value'};
-  for(let i=0;i<31;i++)await raw(port,'POST','/api/v1/auth/login',{host:`127.0.0.1:${port}`,'x-forwarded-for':'203.0.113.10'},bad);
-  assert.equal((await raw(port,'POST','/api/v1/auth/login',{host:`127.0.0.1:${port}`,'x-forwarded-for':'203.0.113.10'},bad)).status,429);
-  assert.notEqual((await raw(port,'POST','/api/v1/auth/login',{host:`127.0.0.1:${port}`,'x-forwarded-for':'203.0.113.11'},bad)).status,429);
+  // A different email each time, so the per-account lock does not interfere with what this test checks: the per-address limit.
+  const bad=(n:number)=>({email:`nobody${n}@example.test`,password:'wrong-password-value'});
+  for(let i=0;i<31;i++)await raw(port,'POST','/api/v1/auth/login',{host:`127.0.0.1:${port}`,'x-forwarded-for':'203.0.113.10'},bad(i));
+  assert.equal((await raw(port,'POST','/api/v1/auth/login',{host:`127.0.0.1:${port}`,'x-forwarded-for':'203.0.113.10'},bad(100))).status,429);
+  assert.notEqual((await raw(port,'POST','/api/v1/auth/login',{host:`127.0.0.1:${port}`,'x-forwarded-for':'203.0.113.11'},bad(101))).status,429);
 });
 
 test('healthz needs no database and is reachable from any host',async()=>{
