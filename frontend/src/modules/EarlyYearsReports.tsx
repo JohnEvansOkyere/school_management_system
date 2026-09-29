@@ -22,6 +22,7 @@ export function EarlyYearsReports({ schoolId, csrfToken, role }: Props) {
   const [learners, setLearners] = useState<Learner[]>([]);
   const [learnerId, setLearnerId] = useState('');
   const [strengths, setStrengths] = useState('');
+  const [aiRun, setAiRun] = useState<{ runId: string; source: string; note: string | null; strengths: string; nextSteps: string } | null>(null);
   const [nextSteps, setNextSteps] = useState('');
   const [teacherNote, setTeacherNote] = useState('');
   const [reports, setReports] = useState<Report[]>([]);
@@ -100,11 +101,22 @@ export function EarlyYearsReports({ schoolId, csrfToken, role }: Props) {
     finally { setBusy(false); }
   }
 
+  async function suggestDraft() {
+    const learner = learners.find(row => row.id === learnerId);
+    if (!learner) { setError('Choose an enrolled learner first.'); return; }
+    setBusy(true); setError('');
+    try {
+      const result = await request<{ runId: string; source: string; note: string | null; strengths: string; nextSteps: string }>(`/schools/${schoolId}/ai/early-years/report-draft`, { method: 'POST', headers: { 'x-csrf-token': csrfToken }, body: json({ learnerId, enrolmentId: learner.enrolment_id, periodStart, periodEnd }) });
+      setStrengths(result.strengths); setNextSteps(result.nextSteps); setAiRun(result);
+    } catch (e) { setError((e as Error).message); } finally { setBusy(false); }
+  }
+
   async function createReport(event: FormEvent) {
     event.preventDefault();
     const learner = learners.find(row => row.id === learnerId);
     if (!learner) { setError('Choose an enrolled learner.'); return; }
     await perform(() => post(`/schools/${schoolId}/early-years/reports`, csrfToken, { learnerId, enrolmentId: learner.enrolment_id, periodStart, periodEnd, strengths, nextSteps, ...(teacherNote.trim() ? { teacherNote } : {}) }), 'Narrative report draft saved.');
+    if (aiRun) { const outcome = strengths === aiRun.strengths && nextSteps === aiRun.nextSteps ? 'accepted' : 'edited'; void request(`/schools/${schoolId}/ai/runs/${aiRun.runId}/feedback`, { method: 'POST', headers: { 'x-csrf-token': csrfToken }, body: json({ outcome }) }).catch(() => undefined); setAiRun(null); }
     setStrengths(''); setNextSteps(''); setTeacherNote('');
   }
 
@@ -133,6 +145,8 @@ export function EarlyYearsReports({ schoolId, csrfToken, role }: Props) {
         <label>Report starts<input type="date" value={periodStart} max={today()} onChange={event => setPeriodStart(event.target.value)} required/></label>
         <label>Report ends<input type="date" value={periodEnd} min={periodStart} max={today()} onChange={event => setPeriodEnd(event.target.value)} required/></label>
         <label>Learner<select value={learnerId} onChange={event => setLearnerId(event.target.value)} required><option value="">Choose an enrolled learner</option>{learners.map(row => <option key={row.id} value={row.id}>{row.full_name} · {row.admission_number}</option>)}</select></label></div>
+      <div className="actions"><button type="button" className="secondary" disabled={busy || !learnerId} onClick={() => void suggestDraft()}>Suggest a draft from observations</button></div>
+      {aiRun && <p className="muted" role="status">{aiRun.source === 'ai' ? 'Draft suggested by AI from this period\'s observations. Read it, correct it, and only then save.' : 'A simple draft was built from the recorded observations (AI is not used). Read and edit it before saving.'} Nothing is saved or shared until you save and the headteacher approves.</p>}
       <label>Strengths and progress<textarea minLength={3} maxLength={2000} value={strengths} onChange={event => setStrengths(event.target.value)} required/></label>
       <label>Next steps<textarea minLength={3} maxLength={2000} value={nextSteps} onChange={event => setNextSteps(event.target.value)} required/></label>
       <label>Teacher note (optional)<textarea maxLength={2000} value={teacherNote} onChange={event => setTeacherNote(event.target.value)}/></label>

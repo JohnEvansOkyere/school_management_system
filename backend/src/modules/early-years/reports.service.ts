@@ -59,6 +59,12 @@ export class EarlyYearsReportsService {
     return {templateVersion,learner:preservedSnapshot?.learner??{id:learner.id,fullName:learner.full_name,admissionNumber:learner.admission_number},placement,period:{start:periodStart,end:periodEnd},observations,attendance:{registers:attendanceItems,counts,coverageNote:'Counts include finalized class registers available in this period. No attendance percentage is calculated; registers without a captured learner roster and unmarked entries remain explicit.'}};
   }
 
+  // Same authorization, period and attendance rules as creating the report; used by the AI draft helper.
+  async draftInputs(client:PoolClient,actor:Actor,body:{learnerId:string;enrolmentId:string;periodStart:string;periodEnd:string}){
+    const snapshot=await this.snapshot(client,actor,body.learnerId,body.enrolmentId,body.periodStart,body.periodEnd);
+    return {observations:snapshot.observations as any[],level:snapshot.placement.level as string,classId:snapshot.placement.classId as string};
+  }
+
   private inputDigest(snapshot:unknown,content:{strengths:string;nextSteps:string;teacherNote?:string|null}){
     return digest({templateVersion,snapshot,strengths:content.strengths,nextSteps:content.nextSteps,teacherNote:content.teacherNote??null});
   }
